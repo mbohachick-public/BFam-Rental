@@ -1,0 +1,29 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Python
+backend/.venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Node (when frontend exists)
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# Local booking document uploads (BOOKING_DOCUMENTS_STORAGE=local)
+data/booking-documents/
+backend/data/booking-documents/
+
+# OS / editor
+.DS_Store
+Thumbs.db

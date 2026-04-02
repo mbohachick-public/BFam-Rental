@@ -82,10 +82,14 @@ Mobile: single-column layouts, collapsible filters, calendar suited to small scr
 
 Define concrete routes during implementation; initial shape:
 
-- `GET /items` — list with query params for filters.
+- `GET /items` — list with query params: `category` (exact), `min_cost_per_day`, `max_cost_per_day`, optional `open_from` + `open_to` (item must be `open_for_booking` on every day in range, inclusive).
+- `GET /items/categories` — distinct category values for filter UI.
 - `GET /items/{id}` — detail including image URLs and pricing fields.
 - `GET /items/{id}/availability?from=&to=` — calendar slice (status per day).
-- `POST /booking-requests` — body: item id, date range; server validates open days, 60-day window, minimum days, computes discount; persists pending request.
+- `POST /booking-requests` — `multipart/form-data`: `item_id`, `start_date`, `end_date`, optional `customer_email`, `notes`, required file `drivers_license`; if the item is **towable**, required file `license_plate`. Files are stored on **local disk** by default (`BOOKING_DOCUMENTS_STORAGE=local`, `BOOKING_DOCUMENTS_LOCAL_DIR`) or in Supabase Storage **`booking-documents`** when `BOOKING_DOCUMENTS_STORAGE=supabase`.
+- `GET /admin/booking-requests/{id}/files/drivers-license` | `license-plate` — admin-only; serves local file or redirects to a signed Storage URL.
+- `POST /booking-requests/quote` — JSON preview only (unchanged).
+- Items include **`towable`** (boolean); admin sets it via item create/update.
 - Admin (stub-guarded): `POST/PATCH /admin/items`, `PATCH /admin/booking-requests/{id}/accept`, `PUT /admin/items/{id}/availability` (or per-day PATCH).
 
 ## Data model (high level)

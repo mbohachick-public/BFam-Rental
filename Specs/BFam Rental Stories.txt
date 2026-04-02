@@ -11,6 +11,13 @@ As an admin of the system I should be able to add the attributes for the items.
 As an admin of the system I should be able to accept a proposed booking.
 As an admin of the system I should be able update the status of each item.
 
+As a user I should be able to select the Category when filtering from all the distinct categories of existing items.
+As a user I should be able to increment the Min $ / day and Max $ / day fields by whole numbers.
+As a user I should be able to filter on items that are "Open for Bookings" during a selected date range in combination with the category.
+
+As a user when I am requesting a booking I should be able to upload a picture of my drivers license.
+As a user I should also be able to upload a picture of my license plate for any items that are tagged as towable.
+As an admin I should be able to mark an item as towable.
 
 
 #Tech specs

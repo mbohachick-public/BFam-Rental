@@ -1,0 +1,22 @@
+﻿As a customer I should be able to see a list of items that are available to rent.
+As a customer I should be able to filter that list of items based on attributes of items.
+As a customer I should be able to view a list of standard attributes for every item.  The item  should have an attributes of Cost Per Day, Minimum Day Rental, Category, Array of images, Description, Title, Deposit Amount, User Requirements.
+As I user I should be able to see a calendar which shows the state of each item.  The states resolve to a specific date so each date has a single status.  The possible states are "Out for Use", "Booked", "Open for Booking", “Readying for Use”.
+As a user I should be able to request an item to be booked for days that are currently statused as “Open for Booking”.
+As a user I should be able to request a booking for any set of days within the next 60 days for any item that is in an “Open for Booking” state for those days.
+As a user I should receive discount for the item rental based on the duration of the rental period.  The discount should be 5% per day up to 15%.
+
+As an admin of the system I should be able to add items for rental.
+As an admin of the system I should be able to add the attributes for the items.
+As an admin of the system I should be able to accept a proposed booking.
+As an admin of the system I should be able update the status of each item.
+
+
+
+#Tech specs
+Use supabase for the database
+Use Vite + React with TypeScript for the frontend
+Use python for server side services; all database activity runs through those services (no direct DB access from the browser)
+Use Auth0 for user authentication but stub it out for now
+
+See Implementation-Plan.md for architecture, API sketch, data model notes, and delivery phases.

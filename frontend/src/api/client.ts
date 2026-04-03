@@ -143,3 +143,23 @@ export async function adminPostNoBody<T>(path: string, token: string): Promise<T
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }
+
+/** multipart/form-data with admin token (do not set Content-Type). */
+export async function adminPostFormData<T>(path: string, token: string, formData: FormData): Promise<T> {
+  const res = await apiFetch(`${baseUrl()}${path}`, {
+    method: 'POST',
+    headers: { 'X-Admin-Token': token },
+    body: formData,
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<T>
+}
+
+export async function adminDelete<T>(path: string, token: string): Promise<T> {
+  const res = await apiFetch(`${baseUrl()}${path}`, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Token': token },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<T>
+}

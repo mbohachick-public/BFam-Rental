@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { adminPatch, adminPost, apiGet } from '../../api/client'
+import { adminDelete, adminGet, adminPatch, adminPost, adminPostFormData } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
-import type { ItemDetail } from '../../types'
+import type { ItemDetail, ItemImage } from '../../types'
+
+const MAX_IMAGES = 10
 
 export function AdminItemFormPage() {
   const { id } = useParams<{ id: string }>()
@@ -17,15 +19,17 @@ export function AdminItemFormPage() {
   const [minDays, setMinDays] = useState('1')
   const [deposit, setDeposit] = useState('0')
   const [userReq, setUserReq] = useState('')
-  const [imageUrls, setImageUrls] = useState('')
   const [towable, setTowable] = useState(false)
+  const [active, setActive] = useState(true)
+  const [images, setImages] = useState<ItemImage[]>([])
+  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (isNew || !id) return
+    if (isNew || !id || !adminToken) return
     let cancelled = false
-    apiGet<ItemDetail>(`/items/${id}`)
+    adminGet<ItemDetail>(`/admin/items/${id}`, adminToken)
       .then((it) => {
         if (cancelled) return
         setTitle(it.title)
@@ -35,28 +39,21 @@ export function AdminItemFormPage() {
         setMinDays(String(it.minimum_day_rental))
         setDeposit(String(it.deposit_amount))
         setUserReq(it.user_requirements)
-        setImageUrls(it.images.map((i) => i.url).join('\n'))
+        setImages([...it.images].sort((a, b) => a.sort_order - b.sort_order))
         setTowable(Boolean(it.towable))
+        setActive(it.active !== false)
       })
       .catch((e: Error) => setError(e.message))
     return () => {
       cancelled = true
     }
-  }, [id, isNew])
-
-  function parseUrls(raw: string): string[] {
-    return raw
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-  }
+  }, [id, isNew, adminToken])
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
     if (!adminToken) return
     setSaving(true)
     setError(null)
-    const urls = parseUrls(imageUrls)
     const body = {
       title: title.trim(),
       description: description.trim(),
@@ -66,23 +63,58 @@ export function AdminItemFormPage() {
       deposit_amount: deposit,
       user_requirements: userReq.trim(),
       towable,
-      image_urls: urls,
+      active,
     }
     try {
       if (isNew) {
-        const created = await adminPost<ItemDetail>('/admin/items', adminToken, body)
+        const created = await adminPost<ItemDetail>('/admin/items', adminToken, {
+          ...body,
+          image_urls: [],
+        })
         navigate(`/admin/items/${created.id}/edit`, { replace: true })
       } else if (id) {
-        await adminPatch<ItemDetail>(`/admin/items/${id}`, adminToken, {
-          ...body,
-          image_urls: urls,
-        })
+        await adminPatch<ItemDetail>(`/admin/items/${id}`, adminToken, body)
         navigate('/admin/items')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function onPickFiles(ev: React.ChangeEvent<HTMLInputElement>) {
+    const files = ev.target.files
+    if (!files || !id || !adminToken) return
+    const list = Array.from(files)
+    ev.target.value = ''
+    setError(null)
+    setUploading(true)
+    try {
+      let next = [...images].sort((a, b) => a.sort_order - b.sort_order)
+      for (const file of list) {
+        if (next.length >= MAX_IMAGES) break
+        const fd = new FormData()
+        fd.append('file', file)
+        const added = await adminPostFormData<ItemImage>(`/admin/items/${id}/images`, adminToken, fd)
+        next = [...next, added].sort((a, b) => a.sort_order - b.sort_order)
+        setImages(next)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function removeImage(im: ItemImage) {
+    if (!id || !adminToken) return
+    setError(null)
+    try {
+      const detail = await adminDelete<ItemDetail>(`/admin/items/${id}/images/${im.id}`, adminToken)
+      setImages([...detail.images].sort((a, b) => a.sort_order - b.sort_order))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Remove failed')
     }
   }
 
@@ -154,10 +186,60 @@ export function AdminItemFormPage() {
           />
           <span>Towable (customers must upload a license plate photo when booking)</span>
         </label>
-        <label className="field">
-          <span className="field-label">Image URLs (one per line)</span>
-          <textarea value={imageUrls} onChange={(e) => setImageUrls(e.target.value)} rows={4} />
+        <label className="field field-checkbox">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => setActive(e.target.checked)}
+          />
+          <span>Visible in catalog (uncheck to hide from customers while keeping the item for admin)</span>
         </label>
+
+        <div className="field">
+          <span className="field-label">Photos (up to {MAX_IMAGES}, JPEG / PNG / WebP)</span>
+          {isNew ? (
+            <p className="muted" style={{ marginTop: '0.35rem' }}>
+              Save the item once, then you can upload photos to the catalog bucket.
+            </p>
+          ) : (
+            <>
+              <label className="admin-upload-label">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  disabled={uploading || images.length >= MAX_IMAGES}
+                  onChange={onPickFiles}
+                />
+                <span className="btn btn-secondary btn-sm">
+                  {uploading ? 'Uploading…' : 'Choose images'}
+                </span>
+              </label>
+              <p className="muted" style={{ marginTop: '0.35rem' }}>
+                {images.length >= MAX_IMAGES
+                  ? 'Maximum reached — remove an image to add another.'
+                  : `${MAX_IMAGES - images.length} slot${MAX_IMAGES - images.length === 1 ? '' : 's'} left.`}
+              </p>
+              {images.length > 0 && (
+                <ul className="admin-item-images">
+                  {images.map((im) => (
+                    <li key={im.id}>
+                      <img src={im.url} alt="" />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => removeImage(im)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+
         {error && <p className="error-msg">{error}</p>}
         <div className="booking-actions">
           <Link to="/admin/items" className="btn btn-secondary">

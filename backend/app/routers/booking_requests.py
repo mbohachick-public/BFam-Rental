@@ -2,16 +2,25 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import ValidationError
 from supabase import Client
 
 from app.config import get_settings
 from app.deps import get_supabase_client
-from app.schemas import BookingQuote, BookingRequestCreate, BookingRequestOut, BookingRequestStatus, DayStatus
+from app.schemas import (
+    BookingContactForm,
+    BookingQuote,
+    BookingQuoteRequest,
+    BookingRequestOut,
+    BookingRequestStatus,
+    DayStatus,
+)
 from app.services.booking import compute_rental_amounts, validate_booking_dates
 from app.services.booking_documents import ext_for_content_type, validate_image_upload
 from app.services.booking_storage import save_booking_document
 from app.services.booking_response import booking_out_from_row
 from app.services.dates import iter_days_inclusive
+from app.services.quote_email import send_booking_received_email, send_quote_email
 
 router = APIRouter(prefix="/booking-requests", tags=["booking-requests"])
 
@@ -29,21 +38,47 @@ def _read_upload(upload: UploadFile) -> tuple[bytes, str | None]:
     return raw, upload.content_type
 
 
+def _validation_detail(exc: ValidationError) -> str:
+    parts: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err.get("loc", ()))
+        parts.append(f"{loc}: {err.get('msg', 'invalid')}")
+    return "; ".join(parts) if parts else "Invalid input"
+
+
 @router.post("", response_model=BookingRequestOut, status_code=status.HTTP_201_CREATED)
 def create_booking_request(
     item_id: str = Form(),
     start_date: date = Form(),
     end_date: date = Form(),
-    customer_email: str | None = Form(None),
+    customer_email: str = Form(),
+    customer_phone: str = Form(),
+    customer_first_name: str = Form(),
+    customer_last_name: str = Form(),
+    customer_address: str = Form(),
     notes: str | None = Form(None),
     drivers_license: UploadFile = File(),
     license_plate: UploadFile | None = File(default=None),
     client: Client = Depends(get_supabase_client),
 ) -> BookingRequestOut:
     settings = get_settings()
+    try:
+        contact = BookingContactForm(
+            customer_email=customer_email,
+            customer_phone=customer_phone,
+            customer_first_name=customer_first_name,
+            customer_last_name=customer_last_name,
+            customer_address=customer_address,
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_validation_detail(e),
+        ) from e
+
     item_res = (
         client.table("items")
-        .select("id,cost_per_day,minimum_day_rental,deposit_amount,towable")
+        .select("id,cost_per_day,minimum_day_rental,deposit_amount,towable,title,active")
         .eq("id", item_id)
         .limit(1)
         .execute()
@@ -52,8 +87,10 @@ def create_booking_request(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     item = rows[0]
+    if not bool(item.get("active", True)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     towable = bool(item.get("towable", False))
-    clean_email = (customer_email or "").strip() or None
+    item_title = str(item.get("title") or "Rental item")
     clean_notes = (notes or "").strip() or None
     cost = _decimal(item["cost_per_day"])
     min_days = int(item["minimum_day_rental"])
@@ -109,7 +146,11 @@ def create_booking_request(
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
                 "status": BookingRequestStatus.pending.value,
-                "customer_email": clean_email,
+                "customer_email": str(contact.customer_email),
+                "customer_phone": contact.customer_phone,
+                "customer_first_name": contact.customer_first_name,
+                "customer_last_name": contact.customer_last_name,
+                "customer_address": contact.customer_address,
                 "notes": clean_notes,
                 "base_amount": float(base),
                 "discount_percent": float(disc_pct),
@@ -161,6 +202,18 @@ def create_booking_request(
 
     res2 = client.table("booking_requests").select("*").eq("id", bid).limit(1).execute()
     final = res2.data[0]
+    send_booking_received_email(
+        settings,
+        to_addr=str(contact.customer_email),
+        item_title=item_title,
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat(),
+        num_days=num_days,
+        base_amount=base,
+        discount_percent=disc_pct,
+        discounted_subtotal=disc_sub,
+        deposit_amount=dep,
+    )
     return booking_out_from_row(client, final, sign_document_urls=False)
 
 
@@ -172,19 +225,20 @@ def _booking_store_error_detail(settings) -> str:
         )
     return (
         "Could not store booking documents in Supabase Storage. Ensure the "
-        "'booking-documents' bucket exists and BOOKING_DOCUMENTS_STORAGE=supabase is set for production."
+        "'booking-documents' bucket exists and policies allow the service role to upload."
     )
 
 
 @router.post("/quote", response_model=BookingQuote)
 def quote_booking(
-    body: BookingRequestCreate,
+    body: BookingQuoteRequest,
     client: Client = Depends(get_supabase_client),
 ) -> BookingQuote:
-    """Preview pricing without persisting (same validation as create)."""
+    """Preview pricing; emails the quote when SMTP is configured."""
+    settings = get_settings()
     item_res = (
         client.table("items")
-        .select("id,cost_per_day,minimum_day_rental,deposit_amount")
+        .select("id,title,cost_per_day,minimum_day_rental,deposit_amount,active")
         .eq("id", body.item_id)
         .limit(1)
         .execute()
@@ -193,6 +247,9 @@ def quote_booking(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     item = rows[0]
+    if not bool(item.get("active", True)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    item_title = str(item.get("title") or "Rental item")
     cost = _decimal(item["cost_per_day"])
     min_days = int(item["minimum_day_rental"])
     deposit = _decimal(item["deposit_amount"])
@@ -219,10 +276,23 @@ def quote_booking(
 
     num_days = len(days)
     base, disc_pct, disc_sub, dep = compute_rental_amounts(cost, num_days, deposit)
+    emailed = send_quote_email(
+        settings,
+        to_addr=str(body.customer_email),
+        item_title=item_title,
+        start_date=body.start_date.isoformat(),
+        end_date=body.end_date.isoformat(),
+        num_days=num_days,
+        base_amount=base,
+        discount_percent=disc_pct,
+        discounted_subtotal=disc_sub,
+        deposit_amount=dep,
+    )
     return BookingQuote(
         num_days=num_days,
         base_amount=base,
         discount_percent=disc_pct,
         discounted_subtotal=disc_sub,
         deposit_amount=dep,
+        email_sent=emailed,
     )

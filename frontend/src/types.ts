@@ -21,6 +21,8 @@ export interface ItemSummary {
   deposit_amount: string
   towable?: boolean
   image_urls: string[]
+  /** false = hidden from public catalog; admins still see the item */
+  active?: boolean
 }
 
 export interface ItemDetail extends ItemSummary {
@@ -40,6 +42,7 @@ export interface BookingQuote {
   discount_percent: string
   discounted_subtotal: string
   deposit_amount: string
+  email_sent?: boolean
 }
 
 export interface BookingRequestOut {
@@ -49,7 +52,13 @@ export interface BookingRequestOut {
   end_date: string
   status: BookingRequestStatus
   customer_email: string | null
+  customer_phone?: string | null
+  customer_first_name?: string | null
+  customer_last_name?: string | null
+  customer_address?: string | null
   notes: string | null
+  decline_reason?: string | null
+  decline_email_sent?: boolean | null
   base_amount: string | null
   discount_percent: string | null
   discounted_subtotal: string | null

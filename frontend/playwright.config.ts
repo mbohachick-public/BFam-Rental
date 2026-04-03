@@ -15,6 +15,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
 
+  // WebKit (Safari) is not installable on macOS 12 — use Chromium + iPhone emulation instead.
   projects: [
     {
       name: 'chromium',
@@ -25,8 +26,11 @@ export default defineConfig({
       use: { ...devices['Pixel 7'] },
     },
     {
-      name: 'mobile-safari',
-      use: { ...devices['iPhone 14'] },
+      name: 'mobile-ios',
+      use: {
+        ...devices['iPhone 14'],
+        browserName: 'chromium',
+      },
     },
   ],
 

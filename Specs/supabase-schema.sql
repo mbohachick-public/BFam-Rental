@@ -26,6 +26,7 @@ create table public.items (
   deposit_amount numeric(10, 2) not null default 0 check (deposit_amount >= 0),
   user_requirements text not null default '',
   towable boolean not null default false,
+  active boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -54,7 +55,12 @@ create table public.booking_requests (
   end_date date not null,
   status public.booking_request_status not null default 'pending',
   customer_email text,
+  customer_phone text,
+  customer_first_name text,
+  customer_last_name text,
+  customer_address text,
   notes text,
+  decline_reason text,
   base_amount numeric(10, 2),
   discount_percent numeric(5, 2),
   discounted_subtotal numeric(10, 2),
@@ -68,4 +74,4 @@ create table public.booking_requests (
 create index booking_requests_item_id_idx on public.booking_requests (item_id);
 create index booking_requests_status_idx on public.booking_requests (status);
 
--- Booking files: default app config uses local disk. For Supabase Storage, create private bucket `booking-documents` (see backend README).
+-- Booking files: default app uses Supabase Storage bucket `booking-documents` (private; see backend README). Set BOOKING_DOCUMENTS_STORAGE=local to use disk only.

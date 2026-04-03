@@ -9,16 +9,21 @@ As a user I should receive discount for the item rental based on the duration of
 As an admin of the system I should be able to add items for rental.
 As an admin of the system I should be able to add the attributes for the items.
 As an admin of the system I should be able to accept a proposed booking.
+As an admin of the system I should be able to decline a proposed booking by entering a reason, have the customer notified by email with the item and requested rental period, and have those dates marked open for booking again.
 As an admin of the system I should be able update the status of each item.
+As an admin of the system I should be able to hide an item from the public catalog while still seeing it in the admin item list, with inactive items clearly highlighted.
 
 As a user I should be able to select the Category when filtering from all the distinct categories of existing items.
-As a user I should be able to increment the Min $ / day and Max $ / day fields by whole numbers.
+As a user I should be able to set minimum and maximum $ / day using a single range control with a slider on each end (whole dollars).
 As a user I should be able to filter on items that are "Open for Bookings" during a selected date range in combination with the category.
 
 As a user when I am requesting a booking I should be able to upload a picture of my drivers license.
 As a user I should also be able to upload a picture of my license plate for any items that are tagged as towable.
 As an admin I should be able to mark an item as towable.
 
+As a user when I request a booking I should be required to provide an email address and a phone number.
+As a user I should receive the rental quote at my email address when I request a quote (when email delivery is configured on the server).
+As a user I should see first name, last name, and address fields when requesting a booking, and the system should attempt to extract those from my driver license photo so I can confirm or correct them before submitting (preferably using a local model so my license image is not sent to a third party).
 
 #Tech specs
 Use supabase for the database

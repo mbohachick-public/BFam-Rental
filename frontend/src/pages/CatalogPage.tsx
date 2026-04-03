@@ -10,11 +10,8 @@ function money(s: string) {
     : s
 }
 
-function bumpInt(raw: string, delta: number): string {
-  const n = parseInt(raw, 10)
-  const base = Number.isFinite(n) ? n : 0
-  return String(Math.max(0, base + delta))
-}
+/** Upper bound for the price slider; above this we do not send `max_cost_per_day` (no ceiling). */
+const PRICE_SLIDER_MAX = 500
 
 export function CatalogPage() {
   const [items, setItems] = useState<ItemSummary[]>([])
@@ -22,8 +19,8 @@ export function CatalogPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [category, setCategory] = useState('')
-  const [minCost, setMinCost] = useState('')
-  const [maxCost, setMaxCost] = useState('')
+  const [rangeMin, setRangeMin] = useState(0)
+  const [rangeMax, setRangeMax] = useState(PRICE_SLIDER_MAX)
   const [openFrom, setOpenFrom] = useState('')
   const [openTo, setOpenTo] = useState('')
 
@@ -35,15 +32,15 @@ export function CatalogPage() {
   const query = useMemo(() => {
     const p = new URLSearchParams()
     if (category.trim()) p.set('category', category.trim())
-    if (minCost.trim() !== '') p.set('min_cost_per_day', minCost.trim())
-    if (maxCost.trim() !== '') p.set('max_cost_per_day', maxCost.trim())
+    if (rangeMin > 0) p.set('min_cost_per_day', String(rangeMin))
+    if (rangeMax < PRICE_SLIDER_MAX) p.set('max_cost_per_day', String(rangeMax))
     if (openFrom && openTo && !dateRangeReversed) {
       p.set('open_from', openFrom)
       p.set('open_to', openTo)
     }
     const q = p.toString()
     return q ? `?${q}` : ''
-  }, [category, minCost, maxCost, openFrom, openTo, dateRangeReversed])
+  }, [category, rangeMin, rangeMax, openFrom, openTo, dateRangeReversed])
 
   useEffect(() => {
     let cancelled = false
@@ -89,8 +86,8 @@ export function CatalogPage() {
     <div className="container page-catalog">
       <h1>Catalog</h1>
       <p className="muted">
-        Filter by category, whole-dollar daily rate, and optional date range (every day in the range
-        must be open for booking).
+        Filter by category, daily rate range (drag both handles), and optional date range (every day
+        in the range must be open for booking).
       </p>
 
       <form
@@ -115,65 +112,68 @@ export function CatalogPage() {
               ))}
             </select>
           </label>
-          <label className="field">
-            <span className="field-label">Min $ / day</span>
-            <div className="number-stepper">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm stepper-btn"
-                aria-label="Decrease min price by 1"
-                onClick={() => setMinCost((v) => bumpInt(v, -1))}
-              >
-                −
-              </button>
+          <div className="field field-price-range">
+            <span className="field-label" id="price-range-label">
+              $ / day (left = minimum, right = maximum)
+            </span>
+            <div
+              className="dual-range"
+              role="group"
+              aria-labelledby="price-range-label"
+            >
+              <div className="dual-range-track" aria-hidden />
+              <div
+                className="dual-range-fill"
+                style={{
+                  left: `${(rangeMin / PRICE_SLIDER_MAX) * 100}%`,
+                  width: `${((rangeMax - rangeMin) / PRICE_SLIDER_MAX) * 100}%`,
+                }}
+                aria-hidden
+              />
               <input
-                type="number"
+                type="range"
+                className="dual-range-input dual-range-input-min"
                 min={0}
+                max={PRICE_SLIDER_MAX}
                 step={1}
-                inputMode="numeric"
-                value={minCost}
-                onChange={(e) => setMinCost(e.target.value)}
+                value={rangeMin}
                 aria-label="Minimum dollars per day"
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  setRangeMin(Math.min(v, rangeMax))
+                }}
               />
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm stepper-btn"
-                aria-label="Increase min price by 1"
-                onClick={() => setMinCost((v) => bumpInt(v, 1))}
-              >
-                +
-              </button>
-            </div>
-          </label>
-          <label className="field">
-            <span className="field-label">Max $ / day</span>
-            <div className="number-stepper">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm stepper-btn"
-                aria-label="Decrease max price by 1"
-                onClick={() => setMaxCost((v) => bumpInt(v, -1))}
-              >
-                −
-              </button>
               <input
-                type="number"
+                type="range"
+                className="dual-range-input dual-range-input-max"
                 min={0}
+                max={PRICE_SLIDER_MAX}
                 step={1}
-                inputMode="numeric"
-                value={maxCost}
-                onChange={(e) => setMaxCost(e.target.value)}
+                value={rangeMax}
                 aria-label="Maximum dollars per day"
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  setRangeMax(Math.max(v, rangeMin))
+                }}
               />
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm stepper-btn"
-                onClick={() => setMaxCost((v) => bumpInt(v, 1))}
-              >
-                +
-              </button>
             </div>
-          </label>
+            <div className="dual-range-ticks" aria-hidden>
+              <span>$0</span>
+              <span>${PRICE_SLIDER_MAX}+</span>
+            </div>
+            <div className="dual-range-values muted small">
+              <span>
+                {rangeMin > 0
+                  ? `At least ${money(String(rangeMin))} / day`
+                  : 'No minimum'}
+              </span>
+              <span>
+                {rangeMax < PRICE_SLIDER_MAX
+                  ? `Up to ${money(String(rangeMax))} / day`
+                  : 'No maximum'}
+              </span>
+            </div>
+          </div>
           <label className="field">
             <span className="field-label">Open from</span>
             <input

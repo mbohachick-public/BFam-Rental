@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { adminPut, apiGet } from '../../api/client'
+import { adminGet, adminPut } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
 import { firstOfMonth, iterDaysInMonth, lastOfMonth } from '../../lib/calendar'
 import type { DayAvailability, DayStatus, ItemDetail } from '../../types'
@@ -32,14 +32,16 @@ export function AdminAvailabilityPage() {
   const to = useMemo(() => lastOfMonth(year, month), [year, month])
 
   const loadItem = useCallback(() => {
-    if (!id) return
-    apiGet<ItemDetail>(`/items/${id}`).then(setItem).catch(() => setItem(null))
-  }, [id])
+    if (!id || !adminToken) return
+    adminGet<ItemDetail>(`/admin/items/${id}`, adminToken)
+      .then(setItem)
+      .catch(() => setItem(null))
+  }, [id, adminToken])
 
   const loadAvailability = useCallback(() => {
-    if (!id) return
+    if (!id || !adminToken) return
     const q = new URLSearchParams({ from, to }).toString()
-    apiGet<DayAvailability[]>(`/items/${id}/availability?${q}`)
+    adminGet<DayAvailability[]>(`/admin/items/${id}/availability?${q}`, adminToken)
       .then((d) => {
         const next: Record<string, DayStatus> = {}
         for (const row of d) {
@@ -50,7 +52,7 @@ export function AdminAvailabilityPage() {
       .catch(() => {
         setEdits({})
       })
-  }, [id, from, to])
+  }, [id, from, to, adminToken])
 
   useEffect(() => {
     loadItem()
@@ -109,6 +111,11 @@ export function AdminAvailabilityPage() {
         <span>Calendar</span>
       </p>
       <h1>Availability — {title}</h1>
+      {item && item.active === false && (
+        <p className="admin-inactive-banner">
+          This item is <strong>inactive</strong> (hidden from the public catalog).
+        </p>
+      )}
       <p className="muted">Set one status per date for this month, then save.</p>
 
       <div className="cal-nav">

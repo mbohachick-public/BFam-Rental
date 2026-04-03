@@ -62,18 +62,24 @@ flowchart LR
 - Per-item calendar: one status per date — *Out for Use*, *Booked*, *Open for Booking*, *Readying for Use*.
 - Request a booking only for dates that are *Open for Booking*, within the next **60 days** from the request date.
 - Show rental pricing with duration discount: **5% per day**, **maximum 15%**.
+- **Email** (required) and **phone** (required) on booking requests; **quote** is emailed to that address when **SMTP** is configured on the API.
 
 **Admin**
 
 - Add rental items and their attributes.
-- Accept proposed bookings (with appropriate updates to availability / status).
+- Mark items **active** or **inactive**: inactive items are omitted from the public catalog, item detail, and customer quote/booking APIs; admins still see them in the admin item list (visually highlighted) and can load them via `GET /admin/items/{id}` and `GET /admin/items/{id}/availability` for edit and calendar (public `GET /items/...` returns 404 for inactive items).
+- Accept or **decline** proposed bookings (decline captures a reason, emails the customer with item and dates, sets requested days back to *Open for Booking*).
 - Update each item’s per-date status.
+
+**Data model (items)**
+
+- `items.active` (boolean, default `true`): when `false`, the item is hidden from customers; run `Specs/supabase-migration-item-active.sql` on existing databases.
 
 ## UI wireframes (summary)
 
 - **Catalog**: responsive grid; attribute-driven filters; optional search later.
 - **Item detail**: gallery, full attribute block, calendar with legend, date selection for booking, quote line showing discount cap, submit booking request.
-- **Admin**: item list and create/edit forms; booking request queue with accept action; per-item (or item-scoped) calendar editor for status by date.
+- **Admin**: item list and create/edit forms; booking request queue with accept and decline (reason + customer email); per-item (or item-scoped) calendar editor for status by date.
 - **Auth stub**: Sign-in / account placeholders without real Auth0 until enabled.
 
 Mobile: single-column layouts, collapsible filters, calendar suited to small screens (e.g. scrollable month or week views).
@@ -86,11 +92,11 @@ Define concrete routes during implementation; initial shape:
 - `GET /items/categories` — distinct category values for filter UI.
 - `GET /items/{id}` — detail including image URLs and pricing fields.
 - `GET /items/{id}/availability?from=&to=` — calendar slice (status per day).
-- `POST /booking-requests` — `multipart/form-data`: `item_id`, `start_date`, `end_date`, optional `customer_email`, `notes`, required file `drivers_license`; if the item is **towable**, required file `license_plate`. Files are stored on **local disk** by default (`BOOKING_DOCUMENTS_STORAGE=local`, `BOOKING_DOCUMENTS_LOCAL_DIR`) or in Supabase Storage **`booking-documents`** when `BOOKING_DOCUMENTS_STORAGE=supabase`.
+- `POST /booking-requests` — `multipart/form-data`: `item_id`, `start_date`, `end_date`, required `customer_email`, `customer_phone`, `customer_first_name`, `customer_last_name`, `customer_address`, optional `notes`, required file `drivers_license`; if the item is **towable**, required file `license_plate`. Files go to Supabase Storage **`booking-documents`** by default (`BOOKING_DOCUMENTS_STORAGE=supabase`); use `BOOKING_DOCUMENTS_STORAGE=local` and `BOOKING_DOCUMENTS_LOCAL_DIR` for disk-only dev. Sends booking confirmation email when SMTP is configured.
 - `GET /admin/booking-requests/{id}/files/drivers-license` | `license-plate` — admin-only; serves local file or redirects to a signed Storage URL.
-- `POST /booking-requests/quote` — JSON preview only (unchanged).
+- `POST /booking-requests/quote` — JSON: `item_id`, `start_date`, `end_date`, required `customer_email`; returns quote plus `email_sent` when SMTP delivers the quote email.
 - Items include **`towable`** (boolean); admin sets it via item create/update.
-- Admin (stub-guarded): `POST/PATCH /admin/items`, `PATCH /admin/booking-requests/{id}/accept`, `PUT /admin/items/{id}/availability` (or per-day PATCH).
+- Admin (stub-guarded): `POST/PATCH /admin/items`, `POST /admin/booking-requests/{id}/accept`, `POST /admin/booking-requests/{id}/decline` (JSON `reason`), `PUT /admin/items/{id}/availability` (or per-day PATCH).
 
 ## Data model (high level)
 
@@ -99,7 +105,7 @@ Tables or equivalent concepts (names illustrative):
 - **items** — scalar attributes (title, description, category, cost_per_day, minimum_day_rental, deposit_amount, user_requirements, …).
 - **item_images** — ordered images per item (or JSON array if kept simple early).
 - **item_day_status** — `item_id`, `date`, `status` enum (four values).
-- **booking_requests** — item, date range, status (pending/accepted/rejected), pricing snapshot fields as needed.
+- **booking_requests** — item, date range, status (pending/accepted/rejected), optional **decline_reason**, pricing snapshot, **customer_email**, **customer_phone**, **customer_first_name**, **customer_last_name**, **customer_address**, document storage paths, notes.
 
 ## Delivery phases
 

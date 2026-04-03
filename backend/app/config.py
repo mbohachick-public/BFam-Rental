@@ -12,11 +12,21 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     admin_stub_token: str = "dev-admin-change-me"
-    # booking uploads: "local" = folder on disk; "supabase" = Storage bucket booking-documents
-    booking_documents_storage: str = "local"
+    # booking uploads: "supabase" = Storage bucket booking-documents (default); "local" = folder on disk
+    booking_documents_storage: str = "supabase"
     booking_documents_local_dir: str = "data/booking-documents"
+    # catalog item photos: public bucket item-images (default), or local for dev without Storage
+    item_images_storage: str = "supabase"
+    item_images_local_dir: str = "data/item-images"
     # Used in JSON links for local file routes (admin opens in new tab with ?admin_token=)
     api_public_url: str = "http://127.0.0.1:8000"
+    # Optional SMTP — when set, quote and booking confirmation emails are sent to the customer.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
 
     @field_validator("supabase_url")
     @classmethod
@@ -41,9 +51,17 @@ class Settings(BaseSettings):
     @field_validator("booking_documents_storage")
     @classmethod
     def booking_storage_mode(cls, v: str) -> str:
-        s = (v or "local").strip().lower()
+        s = (v or "supabase").strip().lower()
         if s not in ("local", "supabase"):
             raise ValueError('BOOKING_DOCUMENTS_STORAGE must be "local" or "supabase".')
+        return s
+
+    @field_validator("item_images_storage")
+    @classmethod
+    def item_images_storage_mode(cls, v: str) -> str:
+        s = (v or "supabase").strip().lower()
+        if s not in ("local", "supabase"):
+            raise ValueError('ITEM_IMAGES_STORAGE must be "local" or "supabase".')
         return s
 
     @property

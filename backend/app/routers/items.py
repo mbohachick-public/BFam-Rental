@@ -1,15 +1,20 @@
+import mimetypes
 from collections import Counter
 from datetime import date
 from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from supabase import Client
 
+from app.config import get_settings
 from app.deps import get_supabase_client
 from app.repos.item_images import load_images_for_items
 from app.schemas import DayAvailability, DayStatus, ItemDetail, ItemImageOut, ItemSummary
 from app.services.dates import iter_days_inclusive
+from app.services.item_availability import day_availability_range
+from app.services.item_images_storage import local_asset_file_path
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -39,8 +44,8 @@ def list_items(
         )
 
     q = client.table("items").select(
-        "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable"
-    )
+        "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,active"
+    ).eq("active", True)
     if category and category.strip():
         q = q.eq("category", category.strip())
     res = q.order("title").execute()
@@ -92,6 +97,7 @@ def list_items(
                 deposit_amount=_decimal(row["deposit_amount"]),
                 towable=bool(row.get("towable", False)),
                 image_urls=urls,
+                active=bool(row.get("active", True)),
             )
         )
     return out
@@ -99,10 +105,22 @@ def list_items(
 
 @router.get("/categories", response_model=list[str])
 def list_categories(client: Client = Depends(get_supabase_client)) -> list[str]:
-    res = client.table("items").select("category").execute()
+    res = client.table("items").select("category").eq("active", True).execute()
     rows = res.data or []
     seen = {(r.get("category") or "").strip() for r in rows if (r.get("category") or "").strip()}
     return sorted(seen, key=str.lower)
+
+
+@router.get("/asset-images/{item_id}/{filename}")
+def serve_local_item_asset_image(item_id: str, filename: str):
+    settings = get_settings()
+    if settings.item_images_storage != "local":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    local = local_asset_file_path(settings, item_id, filename)
+    if not local:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    media, _ = mimetypes.guess_type(local.name)
+    return FileResponse(local, media_type=media or "application/octet-stream")
 
 
 @router.get("/{item_id}", response_model=ItemDetail)
@@ -110,7 +128,7 @@ def get_item(item_id: str, client: Client = Depends(get_supabase_client)) -> Ite
     res = (
         client.table("items")
         .select(
-            "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable"
+            "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,active"
         )
         .eq("id", item_id)
         .limit(1)
@@ -120,6 +138,8 @@ def get_item(item_id: str, client: Client = Depends(get_supabase_client)) -> Ite
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     row = rows[0]
+    if not bool(row.get("active", True)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     img_res = (
         client.table("item_images")
         .select("id,url,sort_order")
@@ -144,6 +164,7 @@ def get_item(item_id: str, client: Client = Depends(get_supabase_client)) -> Ite
         description=row["description"],
         user_requirements=row["user_requirements"],
         images=images,
+        active=True,
     )
 
 
@@ -154,27 +175,11 @@ def get_availability(
     date_to: Annotated[date, Query(alias="to")],
     client: Client = Depends(get_supabase_client),
 ) -> list[DayAvailability]:
-    check = client.table("items").select("id").eq("id", item_id).limit(1).execute()
-    if not (check.data or []):
+    check = client.table("items").select("id,active").eq("id", item_id).limit(1).execute()
+    chk_rows = check.data or []
+    if not chk_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    if not bool(chk_rows[0].get("active", True)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
-    res = (
-        client.table("item_day_status")
-        .select("day,status")
-        .eq("item_id", item_id)
-        .gte("day", date_from.isoformat())
-        .lte("day", date_to.isoformat())
-        .execute()
-    )
-    status_by_day: dict[date, DayStatus] = {}
-    for r in res.data or []:
-        d = date.fromisoformat(str(r["day"]))
-        status_by_day[d] = DayStatus(r["status"])
-
-    out: list[DayAvailability] = []
-    d = date_from
-    while d <= date_to:
-        st = status_by_day.get(d)
-        out.append(DayAvailability(day=d, status=st))
-        d = date.fromordinal(d.toordinal() + 1)
-    return out
+    return day_availability_range(client, item_id, date_from, date_to)

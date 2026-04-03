@@ -34,10 +34,18 @@ export function AdminItemsPage() {
       {error && <p className="error-msg">{error}</p>}
       <ul className="admin-table-list card">
         {items.map((it) => (
-          <li key={it.id} className="admin-table-row">
+          <li
+            key={it.id}
+            className={`admin-table-row${it.active === false ? ' admin-table-row-inactive' : ''}`}
+          >
             <div>
               <strong>{it.title}</strong>
               <span className="muted"> · {it.category}</span>
+              {it.active === false && (
+                <span className="admin-badge-inactive" title="Hidden from public catalog">
+                  Inactive
+                </span>
+              )}
             </div>
             <div className="muted">{money(it.cost_per_day)} / day</div>
             <div className="admin-row-actions">

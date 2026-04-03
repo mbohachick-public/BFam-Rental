@@ -27,6 +27,10 @@ export function ItemDetailPage() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [address, setAddress] = useState('')
   const [notes, setNotes] = useState('')
   const [quote, setQuote] = useState<BookingQuote | null>(null)
   const [quoteError, setQuoteError] = useState<string | null>(null)
@@ -34,10 +38,20 @@ export function ItemDetailPage() {
   const [submitOk, setSubmitOk] = useState<string | null>(null)
   const [driversLicenseFile, setDriversLicenseFile] = useState<File | null>(null)
   const [licensePlateFile, setLicensePlateFile] = useState<File | null>(null)
+  const [activeImageIdx, setActiveImageIdx] = useState(0)
+
+  const sortedImages = useMemo(
+    () => (item ? [...item.images].sort((a, b) => a.sort_order - b.sort_order) : []),
+    [item],
+  )
 
   useEffect(() => {
     setDriversLicenseFile(null)
     setLicensePlateFile(null)
+    setFirstName('')
+    setLastName('')
+    setAddress('')
+    setActiveImageIdx(0)
   }, [id])
 
   useEffect(() => {
@@ -91,6 +105,11 @@ export function ItemDetailPage() {
       setQuoteError('Choose a start and end date.')
       return
     }
+    const em = email.trim()
+    if (!em) {
+      setQuoteError('Email is required — we will send your quote there.')
+      return
+    }
     setQuoteError(null)
     setQuote(null)
     try {
@@ -98,6 +117,7 @@ export function ItemDetailPage() {
         item_id: id,
         start_date: startDate,
         end_date: endDate,
+        customer_email: em,
       })
       setQuote(q)
     } catch (e) {
@@ -115,6 +135,23 @@ export function ItemDetailPage() {
       setQuoteError('This item is towable — please upload a photo of your vehicle’s license plate.')
       return
     }
+    const em = email.trim()
+    const ph = phone.trim()
+    const fn = firstName.trim()
+    const ln = lastName.trim()
+    const addr = address.trim()
+    if (!em) {
+      setQuoteError('Email is required.')
+      return
+    }
+    if (ph.length < 7) {
+      setQuoteError('Please enter a valid phone number (at least 7 digits).')
+      return
+    }
+    if (!fn || !ln || !addr) {
+      setQuoteError('First name, last name, and address are required (correct auto-fill if needed).')
+      return
+    }
     setSubmitting(true)
     setSubmitOk(null)
     setQuoteError(null)
@@ -123,7 +160,11 @@ export function ItemDetailPage() {
       fd.append('item_id', id)
       fd.append('start_date', startDate)
       fd.append('end_date', endDate)
-      if (email.trim()) fd.append('customer_email', email.trim())
+      fd.append('customer_email', em)
+      fd.append('customer_phone', ph)
+      fd.append('customer_first_name', fn)
+      fd.append('customer_last_name', ln)
+      fd.append('customer_address', addr)
       if (notes.trim()) fd.append('notes', notes.trim())
       fd.append('drivers_license', driversLicenseFile)
       if (item.towable && licensePlateFile) {
@@ -158,7 +199,11 @@ export function ItemDetailPage() {
     )
   }
 
-  const mainImage = item.images[0]?.url ?? item.image_urls[0]
+  const displayImageIdx =
+    sortedImages.length === 0 ? 0 : Math.min(activeImageIdx, sortedImages.length - 1)
+
+  const mainImage =
+    sortedImages.length > 0 ? sortedImages[displayImageIdx]?.url : item.image_urls[0]
 
   return (
     <div className="container page-item">
@@ -175,11 +220,19 @@ export function ItemDetailPage() {
           ) : (
             <div className="item-hero-placeholder" />
           )}
-          {item.images.length > 1 && (
+          {sortedImages.length > 1 && (
             <ul className="item-thumbs">
-              {item.images.map((im) => (
+              {sortedImages.map((im, idx) => (
                 <li key={im.id}>
-                  <img src={im.url} alt="" loading="lazy" />
+                  <button
+                    type="button"
+                    className={`item-thumb-btn${idx === displayImageIdx ? ' item-thumb-btn-active' : ''}`}
+                    onClick={() => setActiveImageIdx(idx)}
+                    aria-pressed={idx === displayImageIdx}
+                    aria-label={`View image ${idx + 1} of ${sortedImages.length}`}
+                  >
+                    <img src={im.url} alt="" loading="lazy" />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -236,9 +289,10 @@ export function ItemDetailPage() {
       <section className="card card-pad section-block booking-block">
         <h2>Request a booking</h2>
         <p className="muted">
-          Pick a range within the next 60 days. All days must be open for booking. Discount: 5% per
-          rental day, up to 15%. Upload a clear photo of your driver’s license (JPEG, PNG, or WebP,
-          max 10 MB).
+          Pick a range within the next 60 days, then upload your license (and plate if towable).
+          All days must be open for booking. Discount: 5% per rental day, up to 15%.{' '}
+          <strong>Email is required</strong> — we email your quote when you click Get quote, and a
+          confirmation when you submit. License photo: JPEG, PNG, or WebP, max 10 MB.
           {item.towable ? ' Towable rentals also require a photo of your tow vehicle’s license plate.' : ''}
         </p>
         <div className="booking-grid">
@@ -265,19 +319,6 @@ export function ItemDetailPage() {
             />
           </label>
           <label className="field field-span">
-            <span className="field-label">Email (optional)</span>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-            />
-          </label>
-          <label className="field field-span">
-            <span className="field-label">Notes (optional)</span>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-          </label>
-          <label className="field field-span">
             <span className="field-label">Driver’s license photo (required)</span>
             <input
               type="file"
@@ -295,6 +336,61 @@ export function ItemDetailPage() {
               />
             </label>
           )}
+          <label className="field field-span">
+            <span className="field-label">Email (required)</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+          </label>
+          <label className="field field-span">
+            <span className="field-label">Phone (required)</span>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              autoComplete="tel"
+              inputMode="tel"
+              required
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">First name (required)</span>
+            <input
+              type="text"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              autoComplete="given-name"
+              required
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Last name (required)</span>
+            <input
+              type="text"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              autoComplete="family-name"
+              required
+            />
+          </label>
+          <label className="field field-span">
+            <span className="field-label">Address (required)</span>
+            <input
+              type="text"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              autoComplete="street-address"
+              required
+            />
+          </label>
+          <label className="field field-span">
+            <span className="field-label">Notes (optional)</span>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+          </label>
         </div>
         {quoteError && <p className="error-msg">{quoteError}</p>}
         {submitOk && <p className="success-msg">{submitOk}</p>}
@@ -310,7 +406,12 @@ export function ItemDetailPage() {
               submitting ||
               !quote ||
               !driversLicenseFile ||
-              (item.towable ? !licensePlateFile : false)
+              (item.towable ? !licensePlateFile : false) ||
+              !email.trim() ||
+              phone.trim().length < 7 ||
+              !firstName.trim() ||
+              !lastName.trim() ||
+              !address.trim()
             }
           >
             {submitting ? 'Sending…' : 'Submit request'}
@@ -319,6 +420,14 @@ export function ItemDetailPage() {
         {quote && (
           <div className="quote card card-pad">
             <h3>Quote</h3>
+            {quote.email_sent ? (
+              <p className="success-msg small">We emailed this quote to {email.trim()}.</p>
+            ) : (
+              <p className="muted small">
+                Quote not emailed — configure SMTP on the API (see backend README) to receive it by
+                email.
+              </p>
+            )}
             <ul className="quote-lines">
               <li>
                 <span>Days</span>

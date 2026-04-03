@@ -19,6 +19,7 @@ def booking_out_from_row(
     row: dict,
     *,
     sign_document_urls: bool,
+    decline_email_sent: bool | None = None,
 ) -> BookingRequestOut:
     dl_url = lp_url = None
     if sign_document_urls:
@@ -30,11 +31,17 @@ def booking_out_from_row(
         end_date=date.fromisoformat(str(row["end_date"])),
         status=BookingRequestStatus(row["status"]),
         customer_email=row.get("customer_email"),
+        customer_phone=row.get("customer_phone"),
+        customer_first_name=row.get("customer_first_name"),
+        customer_last_name=row.get("customer_last_name"),
+        customer_address=row.get("customer_address"),
         notes=row.get("notes"),
+        decline_reason=row.get("decline_reason"),
         base_amount=_dec(row.get("base_amount")),
         discount_percent=_dec(row.get("discount_percent")),
         discounted_subtotal=_dec(row.get("discounted_subtotal")),
         deposit_amount=_dec(row.get("deposit_amount")),
         drivers_license_url=dl_url,
         license_plate_url=lp_url,
+        decline_email_sent=decline_email_sent,
     )

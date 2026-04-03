@@ -24,6 +24,13 @@ frontend/.env.local
 data/booking-documents/
 backend/data/booking-documents/
 
+# Local catalog item images (ITEM_IMAGES_STORAGE=local)
+data/item-images/
+backend/data/item-images/
+
+# Generated / local test assets (e.g. sample license images for dev)
+assets/test-fixtures/
+
 # OS / editor
 .DS_Store
 Thumbs.db

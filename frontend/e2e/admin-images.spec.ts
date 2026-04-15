@@ -30,10 +30,12 @@ test.describe('Admin item image uploads', () => {
 
   test('remove an image via remove button', async ({ page, api }) => {
     // Ensure at least one image exists
-    await api.uploadImage(itemId, 'remove-me.png', 'image/png', tinyPng())
+    const up = await api.uploadImage(itemId, 'remove-me.png', 'image/png', tinyPng())
+    expect(up.ok(), `upload failed: ${up.status()} ${await up.text()}`).toBeTruthy()
 
     await page.goto(`/admin/items/${itemId}/edit`)
     const images = page.locator('.admin-item-images li')
+    await expect(images.first()).toBeVisible({ timeout: 15_000 })
     const countBefore = await images.count()
     expect(countBefore).toBeGreaterThanOrEqual(1)
 

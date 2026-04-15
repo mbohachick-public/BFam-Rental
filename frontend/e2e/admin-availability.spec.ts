@@ -56,7 +56,7 @@ test.describe('Admin availability calendar', () => {
   test('inactive item shows banner on calendar page', async ({ page, api }) => {
     const item = await api.createItem({ title: 'Inactive Avail E2E', active: false })
     await page.goto(`/admin/items/${item.id}/availability`)
-    await expect(page.getByText(/inactive/i)).toBeVisible()
+    await expect(page.locator('.admin-inactive-banner')).toBeVisible()
   })
 
   test('breadcrumb links back to items list', async ({ page }) => {

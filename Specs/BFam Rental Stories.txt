@@ -4,7 +4,12 @@ As a customer I should be able to view a list of standard attributes for every i
 As I user I should be able to see a calendar which shows the state of each item.  The states resolve to a specific date so each date has a single status.  The possible states are "Out for Use", "Booked", "Open for Booking", “Readying for Use”.
 As a user I should be able to request an item to be booked for days that are currently statused as “Open for Booking”.
 As a user I should be able to request a booking for any set of days within the next 60 days for any item that is in an “Open for Booking” state for those days.
-As a user I should receive discount for the item rental based on the duration of the rental period.  The discount should be 5% per day up to 15%.
+
+As a customer I should be able to sign in with a remote account such as Google where offered.
+As a customer I should be able to sign in with email and password when I prefer that or when social sign-in is unavailable.
+As a customer I should have a consistent account experience so my identity can be tied to bookings and future features (e.g. order history) as the product grows.
+As a signed-in customer I should be able to view a list of my past and current rental requests (status, dates, item, and amounts as appropriate).
+As a signed-in customer when I open the booking form on an item my contact fields should be prefilled from my previous submissions except I must upload a driver’s license each time; license plate rules for towable items are unchanged.
 
 As an admin of the system I should be able to add items for rental.
 As an admin of the system I should be able to add the attributes for the items.
@@ -22,6 +27,7 @@ As a user I should also be able to upload a picture of my license plate for any 
 As an admin I should be able to mark an item as towable.
 
 As a user when I request a booking I should be required to provide an email address and a phone number.
+As a user the rental quote I request should include proper sales tax on the rental subtotal (and show tax as its own line), calculated using current rates. The system should prefer fetching the applicable rate from an official government-provided API or endpoint for the business’s taxing jurisdiction when one exists; if no suitable government API is available for that jurisdiction, the implementation should document and use the next-best authoritative source. For the initial version, each quote should perform a live lookup with no caching of tax rates.
 As a user I should receive the rental quote at my email address when I request a quote (when email delivery is configured on the server).
 As a user I should see first name, last name, and address fields when requesting a booking, and the system should attempt to extract those from my driver license photo so I can confirm or correct them before submitting (preferably using a local model so my license image is not sent to a third party).
 
@@ -29,6 +35,6 @@ As a user I should see first name, last name, and address fields when requesting
 Use supabase for the database
 Use Vite + React with TypeScript for the frontend
 Use python for server side services; all database activity runs through those services (no direct DB access from the browser)
-Use Auth0 for user authentication but stub it out for now
+Use Auth0 for customer authentication: Auth0 Free tier is sufficient for initial scale (MAU within Free limits). Enable a database connection for email/username + password and a Google social connection; prioritize surfacing Google (and similar) sign-in in the UI while keeping password sign-in available. The React app integrates via Auth0 (e.g. SPA SDK or Universal Login); FastAPI validates JWTs (JWKS) on protected routes. Admin access remains stubbed (X-Admin-Token) until replaced with Auth0 roles or a dedicated admin auth approach.
 
 See Implementation-Plan.md for architecture, API sketch, data model notes, and delivery phases.

@@ -14,7 +14,7 @@ test.describe('Home page', () => {
     await page.goto('/')
     await expect(page.getByText('Clear pricing')).toBeVisible()
     await expect(page.getByText('Live calendar')).toBeVisible()
-    await expect(page.getByText('Duration savings')).toBeVisible()
+    await expect(page.getByText('Request online')).toBeVisible()
   })
 
   test('unknown routes redirect to home', async ({ page }) => {

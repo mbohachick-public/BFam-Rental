@@ -1,22 +1,4 @@
 {
-  "status": "interrupted",
-  "failedTests": [
-    "ddd864604af8a6a0198f-268a70c4079db788c9ec",
-    "ddd864604af8a6a0198f-c812cf95dde641ae4c7b",
-    "ddd864604af8a6a0198f-f1c701799c2cbdf7a512",
-    "ddd864604af8a6a0198f-36a5f356a848d8ccbe48",
-    "ddd864604af8a6a0198f-08907a426bab63e215ba",
-    "ddd864604af8a6a0198f-0dcf08086ce025c7bd4b",
-    "ddd864604af8a6a0198f-499ac37b9cf709dac5cc",
-    "ddd864604af8a6a0198f-38a8364b5b228d80a251",
-    "ddd864604af8a6a0198f-298d331f0705d7107cf9",
-    "ddd864604af8a6a0198f-72f29e33bd61d1325ef9",
-    "ddd864604af8a6a0198f-07ed24c00aa5ee8f1512",
-    "d1caeb8e4ec12f69250b-c2bd7ae0e8bee3525662",
-    "d1caeb8e4ec12f69250b-65155042caa3773b6158",
-    "d1caeb8e4ec12f69250b-a1b7d3dd6b0a7c54b1d2",
-    "d1caeb8e4ec12f69250b-a277f8c048638f012bef",
-    "d1caeb8e4ec12f69250b-e1dd99d83af8b239f3e6",
-    "d1caeb8e4ec12f69250b-0e7d5150b69919b52c12"
-  ]
+  "status": "passed",
+  "failedTests": []
 }

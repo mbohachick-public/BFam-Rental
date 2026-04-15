@@ -16,8 +16,6 @@ def test_list_items_returns_active_only(client, seed_item, admin_headers):
 
 def test_list_items_filter_by_category(client, seed_item):
     seed_item(title="Trailer A", active=True)
-    # Patch category directly
-    from tests.conftest import defaultdict  # noqa – just to confirm import works
 
     res = client.get("/items", params={"category": "general"})
     assert res.status_code == 200
@@ -46,6 +44,20 @@ def test_list_items_open_from_to_validation(client):
 def test_list_items_open_from_after_to_is_rejected(client):
     res = client.get("/items", params={"open_from": "2026-06-01", "open_to": "2026-05-01"})
     assert res.status_code == 400
+
+
+def test_list_items_open_date_range_auto_seeds_availability(client, seed_item):
+    """Items with no prior item_day_status rows still match open_from/open_to after lazy seed."""
+    seed_item(title="Auto Seed Open", active=True)
+    d0 = date.today()
+    d1 = d0 + timedelta(days=2)
+    res = client.get(
+        "/items",
+        params={"open_from": d0.isoformat(), "open_to": d1.isoformat()},
+    )
+    assert res.status_code == 200
+    titles = [i["title"] for i in res.json()]
+    assert "Auto Seed Open" in titles
 
 
 def test_get_item_returns_detail(client, seed_item):

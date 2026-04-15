@@ -4,27 +4,17 @@ from decimal import Decimal
 from app.services.dates import iter_days_inclusive
 
 
-def duration_discount_percent(num_days: int) -> Decimal:
-    """5% per day of rental, capped at 15%."""
-    if num_days <= 0:
-        return Decimal("0")
-    raw = Decimal(num_days * 5)
-    cap = Decimal("15")
-    return raw if raw <= cap else cap
-
-
 def compute_rental_amounts(
     cost_per_day: Decimal, num_days: int, deposit: Decimal
 ) -> tuple[Decimal, Decimal, Decimal, Decimal]:
     """
     Returns (base_amount, discount_percent, discounted_subtotal, deposit_amount).
-    Discount applies to rental subtotal only, not deposit.
+    Rental subtotal is cost_per_day × days (no duration discount). discount_percent is
+    always 0 and discounted_subtotal equals base_amount; columns kept for existing rows/API.
     """
-    base = cost_per_day * num_days
-    pct = duration_discount_percent(num_days)
-    factor = Decimal("1") - (pct / Decimal("100"))
-    discounted = (base * factor).quantize(Decimal("0.01"))
-    return base, pct, discounted, deposit
+    base = (cost_per_day * num_days).quantize(Decimal("0.01"))
+    zero = Decimal("0")
+    return base, zero, base, deposit
 
 
 def booking_window_end(today: date) -> date:

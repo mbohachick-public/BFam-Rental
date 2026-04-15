@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiGet, apiPost, apiPostFormData } from '../api/client'
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  apiPostFormData,
+  uploadBookingFileToSignedUrl,
+} from '../api/client'
+import { useCustomerSession } from '../context/CustomerSessionContext'
 import { MonthCalendar } from '../components/MonthCalendar'
 import { StatusLegend } from '../components/StatusLegend'
 import { firstOfMonth, lastOfMonth } from '../lib/calendar'
-import type { BookingQuote, DayAvailability, ItemDetail } from '../types'
+import type {
+  BookingPresignResponse,
+  BookingQuote,
+  BookingRequestOut,
+  CustomerContactProfile,
+  DayAvailability,
+  ItemDetail,
+} from '../types'
 
 function money(s: string) {
   const n = Number(s)
@@ -14,6 +28,8 @@ function money(s: string) {
 }
 
 export function ItemDetailPage() {
+  const customer = useCustomerSession()
+  const customerSignedIn = customer.mode === 'auth0' && customer.isAuthenticated
   const { id } = useParams<{ id: string }>()
   const [item, setItem] = useState<ItemDetail | null>(null)
   const [days, setDays] = useState<DayAvailability[]>([])
@@ -31,6 +47,7 @@ export function ItemDetailPage() {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [address, setAddress] = useState('')
+  const [taxZip, setTaxZip] = useState('')
   const [notes, setNotes] = useState('')
   const [quote, setQuote] = useState<BookingQuote | null>(null)
   const [quoteError, setQuoteError] = useState<string | null>(null)
@@ -51,6 +68,7 @@ export function ItemDetailPage() {
     setFirstName('')
     setLastName('')
     setAddress('')
+    setTaxZip('')
     setActiveImageIdx(0)
   }, [id])
 
@@ -94,6 +112,26 @@ export function ItemDetailPage() {
     loadAvailability()
   }, [loadAvailability])
 
+  useEffect(() => {
+    if (!customerSignedIn || !id) return
+    let cancelled = false
+    apiGet<CustomerContactProfile>('/booking-requests/me/contact')
+      .then((p) => {
+        if (cancelled) return
+        setEmail((prev) => (prev.trim() ? prev : p.customer_email))
+        setPhone((prev) => (prev.trim() ? prev : p.customer_phone))
+        setFirstName((prev) => (prev.trim() ? prev : p.customer_first_name))
+        setLastName((prev) => (prev.trim() ? prev : p.customer_last_name))
+        setAddress((prev) => (prev.trim() ? prev : p.customer_address))
+      })
+      .catch(() => {
+        /* 404 = no prior bookings */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [id, customerSignedIn])
+
   function shiftMonth(delta: number) {
     const d = new Date(calYear, calMonth - 1 + delta, 1)
     setCalYear(d.getFullYear())
@@ -113,11 +151,13 @@ export function ItemDetailPage() {
     setQuoteError(null)
     setQuote(null)
     try {
+      const zip = taxZip.trim()
       const q = await apiPost<BookingQuote>('/booking-requests/quote', {
         item_id: id,
         start_date: startDate,
         end_date: endDate,
         customer_email: em,
+        ...(zip ? { tax_postal_code: zip } : {}),
       })
       setQuote(q)
     } catch (e) {
@@ -155,7 +195,7 @@ export function ItemDetailPage() {
     setSubmitting(true)
     setSubmitOk(null)
     setQuoteError(null)
-    try {
+    const submitMultipart = async () => {
       const fd = new FormData()
       fd.append('item_id', id)
       fd.append('start_date', startDate)
@@ -171,6 +211,57 @@ export function ItemDetailPage() {
         fd.append('license_plate', licensePlateFile)
       }
       await apiPostFormData('/booking-requests', fd)
+    }
+    try {
+      const dlType = driversLicenseFile.type || 'image/jpeg'
+      const lpType =
+        item.towable && licensePlateFile ? licensePlateFile.type || 'image/jpeg' : undefined
+      const presignBody = {
+        item_id: id,
+        start_date: startDate,
+        end_date: endDate,
+        customer_email: em,
+        customer_phone: ph,
+        customer_first_name: fn,
+        customer_last_name: ln,
+        customer_address: addr,
+        notes: notes.trim() || undefined,
+        drivers_license_content_type: dlType,
+        license_plate_content_type: lpType,
+      }
+      try {
+        const pre = await apiPost<BookingPresignResponse>('/booking-requests/presign', presignBody)
+        try {
+          await uploadBookingFileToSignedUrl(pre.drivers_license.signed_url, driversLicenseFile, dlType)
+          if (pre.license_plate && licensePlateFile) {
+            await uploadBookingFileToSignedUrl(
+              pre.license_plate.signed_url,
+              licensePlateFile,
+              lpType || 'image/jpeg',
+            )
+          }
+          await apiPost<BookingRequestOut>(`/booking-requests/${pre.booking_id}/complete`, {
+            drivers_license_path: pre.drivers_license.path,
+            license_plate_path: pre.license_plate?.path ?? null,
+          })
+        } catch (stepErr) {
+          try {
+            await apiDelete(`/booking-requests/${pre.booking_id}/abandon`)
+          } catch {
+            /* best-effort cleanup */
+          }
+          throw stepErr
+        }
+      } catch (inner) {
+        const m = inner instanceof Error ? inner.message : String(inner)
+        if (
+          /BOOKING_DOCUMENTS_STORAGE=local|multipart form data|Presigned uploads require/i.test(m)
+        ) {
+          await submitMultipart()
+        } else {
+          throw inner
+        }
+      }
       setSubmitOk('Request submitted. We will follow up when it is reviewed.')
       setQuote(null)
       setDriversLicenseFile(null)
@@ -288,9 +379,17 @@ export function ItemDetailPage() {
 
       <section className="card card-pad section-block booking-block">
         <h2>Request a booking</h2>
+        {customer.mode === 'auth0' && !customer.isLoading && !customer.isAuthenticated && (
+          <p className="booking-auth-hint">
+            <span className="muted">Sign in to get a quote and submit a booking request.</span>{' '}
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => customer.login()}>
+              Sign in
+            </button>
+          </p>
+        )}
         <p className="muted">
           Pick a range within the next 60 days, then upload your license (and plate if towable).
-          All days must be open for booking. Discount: 5% per rental day, up to 15%.{' '}
+          All days must be open for booking.{' '}
           <strong>Email is required</strong> — we email your quote when you click Get quote, and a
           confirmation when you submit. License photo: JPEG, PNG, or WebP, max 10 MB.
           {item.towable ? ' Towable rentals also require a photo of your tow vehicle’s license plate.' : ''}
@@ -344,6 +443,21 @@ export function ItemDetailPage() {
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
               required
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">ZIP for sales tax (optional)</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="postal-code"
+              maxLength={10}
+              placeholder="e.g. 64089"
+              value={taxZip}
+              onChange={(e) => {
+                setTaxZip(e.target.value)
+                setQuote(null)
+              }}
             />
           </label>
           <label className="field field-span">
@@ -434,22 +548,27 @@ export function ItemDetailPage() {
                 <span>{quote.num_days}</span>
               </li>
               <li>
-                <span>Base rental</span>
-                <span>{money(quote.base_amount)}</span>
-              </li>
-              <li>
-                <span>Duration discount</span>
-                <span>{quote.discount_percent}%</span>
-              </li>
-              <li>
-                <span>Rental after discount</span>
+                <span>Rental subtotal</span>
                 <span>{money(quote.discounted_subtotal)}</span>
+              </li>
+              <li>
+                <span>
+                  Sales tax ({Number(quote.sales_tax_rate_percent)}%)
+                </span>
+                <span>{money(quote.sales_tax_amount)}</span>
+              </li>
+              <li>
+                <span>Rental total (with tax)</span>
+                <span>{money(quote.rental_total_with_tax)}</span>
               </li>
               <li>
                 <span>Deposit (hold)</span>
                 <span>{money(quote.deposit_amount)}</span>
               </li>
             </ul>
+            <p className="muted small" style={{ marginTop: '0.75rem' }}>
+              Tax source: {quote.sales_tax_source}
+            </p>
           </div>
         )}
       </section>

@@ -14,6 +14,7 @@ from app.repos.item_images import load_images_for_items
 from app.schemas import DayAvailability, DayStatus, ItemDetail, ItemImageOut, ItemSummary
 from app.services.dates import iter_days_inclusive
 from app.services.item_availability import day_availability_range
+from app.services.item_availability_seed import ensure_booking_window_day_status_for_items
 from app.services.item_images_storage import local_asset_file_path
 
 router = APIRouter(prefix="/items", tags=["items"])
@@ -68,6 +69,7 @@ def list_items(
         if not ids:
             filtered = []
         else:
+            ensure_booking_window_day_status_for_items(client, ids)
             st_res = (
                 client.table("item_day_status")
                 .select("item_id")

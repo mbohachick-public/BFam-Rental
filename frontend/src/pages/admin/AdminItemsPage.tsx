@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { adminGet } from '../../api/client'
+import { adminGet, adminPost } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
-import type { ItemSummary } from '../../types'
+import { useAdminApiReady } from '../../hooks/useAdminApiReady'
+import type { E2eCleanupResult, ItemSummary } from '../../types'
 
 function money(s: string) {
   const n = Number(s)
@@ -13,15 +14,49 @@ function money(s: string) {
 
 export function AdminItemsPage() {
   const { adminToken } = useAuth()
+  const adminApiReady = useAdminApiReady()
   const [items, setItems] = useState<ItemSummary[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [cleanupMsg, setCleanupMsg] = useState<string | null>(null)
+  const [cleanupBusy, setCleanupBusy] = useState(false)
 
-  useEffect(() => {
-    if (!adminToken) return
+  const loadItems = useCallback(() => {
+    if (!adminApiReady) return
     adminGet<ItemSummary[]>('/admin/items', adminToken)
       .then(setItems)
       .catch((e: Error) => setError(e.message))
-  }, [adminToken])
+  }, [adminApiReady, adminToken])
+
+  useEffect(() => {
+    loadItems()
+  }, [loadItems])
+
+  async function runE2eCleanup() {
+    if (!adminApiReady) return
+    const ok = window.confirm(
+      'Delete all catalog items in categories e2e-test and e2e-admin, ' +
+        'including related bookings, calendar rows, and storage files? This cannot be undone.',
+    )
+    if (!ok) return
+    setCleanupBusy(true)
+    setCleanupMsg(null)
+    setError(null)
+    try {
+      const res = await adminPost<E2eCleanupResult>(
+        '/admin/maintenance/cleanup-e2e-test-data',
+        adminToken,
+        { confirm: true },
+      )
+      setCleanupMsg(
+        `Removed ${res.items_deleted} item(s); cleaned files for ${res.bookings_processed_for_file_cleanup} booking(s).`,
+      )
+      loadItems()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Cleanup failed')
+    } finally {
+      setCleanupBusy(false)
+    }
+  }
 
   return (
     <div className="page-admin-items">
@@ -60,6 +95,25 @@ export function AdminItemsPage() {
         ))}
       </ul>
       {items.length === 0 && !error && <p className="muted">No items yet.</p>}
+
+      <section className="card admin-e2e-cleanup" style={{ marginTop: '1.5rem' }}>
+        <h2 className="h3" style={{ marginTop: 0 }}>
+          Test data cleanup
+        </h2>
+        <p className="muted" style={{ marginBottom: '0.75rem' }}>
+          Removes items whose category is <code>e2e-test</code> or <code>e2e-admin</code> (Playwright /
+          API test data), related booking rows, and uploaded files.
+        </p>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={!adminApiReady || cleanupBusy}
+          onClick={() => void runE2eCleanup()}
+        >
+          {cleanupBusy ? 'Cleaning…' : 'Remove E2E test data'}
+        </button>
+        {cleanupMsg && <p className="success-msg" style={{ marginTop: '0.75rem' }}>{cleanupMsg}</p>}
+      </section>
     </div>
   )
 }

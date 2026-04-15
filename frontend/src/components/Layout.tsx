@@ -1,8 +1,18 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
+import {
+  DBA_NAME,
+  LEGAL_BUSINESS_NAME,
+  OFFER_TAGLINE,
+  SERVICE_AREA_TAGLINE,
+} from '../branding'
 import { useAuth } from '../context/AuthContext'
+import { useCustomerSession } from '../context/CustomerSessionContext'
+import { useAdminApiReady } from '../hooks/useAdminApiReady'
 
 export function Layout() {
-  const { adminToken, logout } = useAuth()
+  const { logout } = useAuth()
+  const customer = useCustomerSession()
+  const adminApiReady = useAdminApiReady()
 
   return (
     <div className="layout">
@@ -12,7 +22,7 @@ export function Layout() {
             <img src="/logo.png" alt="" width={44} height={44} className="brand-logo" />
             <span className="brand-text">
               <span className="brand-name">BFam</span>
-              <span className="brand-tag">Rental</span>
+              <span className="brand-tag">Rentals &amp; Supply</span>
             </span>
           </Link>
           <nav className="nav-main" aria-label="Main">
@@ -22,7 +32,36 @@ export function Layout() {
             <NavLink to="/catalog" className="nav-link">
               Catalog
             </NavLink>
-            {adminToken ? (
+            {customer.mode === 'auth0' && !customer.isLoading && (
+              <>
+                {customer.isAuthenticated ? (
+                  <>
+                    <NavLink to="/my-rentals" className="nav-link">
+                      My rentals
+                    </NavLink>
+                    <span className="nav-customer-email" title={customer.userEmail}>
+                      {customer.userEmail ?? 'Signed in'}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => customer.logout()}
+                    >
+                      Sign out
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => customer.login()}
+                  >
+                    Sign in
+                  </button>
+                )}
+              </>
+            )}
+            {adminApiReady ? (
               <>
                 <NavLink to="/admin/items" className="nav-link">
                   Admin
@@ -44,7 +83,12 @@ export function Layout() {
       </main>
       <footer className="site-footer">
         <div className="container footer-inner">
-          <p>BFam Rental — equipment &amp; trailer rentals.</p>
+          <p className="footer-brand-line footer-legal-name">{LEGAL_BUSINESS_NAME}</p>
+          <p className="footer-dba">
+            DBA: <strong>{DBA_NAME}</strong>
+          </p>
+          <p className="footer-offer">{OFFER_TAGLINE}</p>
+          <p className="footer-service-area">{SERVICE_AREA_TAGLINE}</p>
         </div>
       </footer>
     </div>

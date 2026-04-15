@@ -29,10 +29,14 @@ test.describe('Catalog page', () => {
   })
 
   test('selecting a non-existent category shows empty state', async ({ page }) => {
-    // Type a fake category directly into the select (or pick one that does not exist)
-    // The select only has existing categories, so we test the empty message via API:
-    await page.route('**/items?*', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+    // Intercept catalog list (Vite dev uses /api/items; direct API uses /items).
+    await page.route(
+      (url) => {
+        const p = new URL(url).pathname
+        return (p === '/api/items' || p === '/items') && !p.includes('/items/')
+      },
+      (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
     )
     await page.reload()
     await expect(page.getByText(/no items match/i)).toBeVisible()

@@ -4,40 +4,17 @@ import io
 from datetime import date, timedelta
 from decimal import Decimal
 
-from app.services.booking import (
-    compute_rental_amounts,
-    duration_discount_percent,
-    validate_booking_dates,
-)
+from app.services.booking import compute_rental_amounts, validate_booking_dates
 
 
 # ---------------------------------------------------------------------------
 # Pure business logic edge cases
 # ---------------------------------------------------------------------------
 
-def test_discount_zero_days():
-    assert duration_discount_percent(0) == Decimal("0")
-
-
-def test_discount_negative_days():
-    assert duration_discount_percent(-3) == Decimal("0")
-
-
-def test_discount_one_day():
-    assert duration_discount_percent(1) == Decimal("5")
-
-
-def test_discount_exactly_three_days():
-    assert duration_discount_percent(3) == Decimal("15")
-
-
-def test_discount_large_stays_at_cap():
-    assert duration_discount_percent(100) == Decimal("15")
-
-
 def test_compute_amounts_zero_cost():
     base, pct, sub, dep = compute_rental_amounts(Decimal("0"), 3, Decimal("50"))
-    assert base == Decimal("0")
+    assert base == Decimal("0.00")
+    assert pct == Decimal("0")
     assert sub == Decimal("0.00")
     assert dep == Decimal("50")
 

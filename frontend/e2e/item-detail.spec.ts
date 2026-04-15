@@ -29,7 +29,7 @@ test.describe('Item detail page', () => {
     await expect(page.getByText(/cost per day/i)).toBeVisible()
     await expect(page.getByText(/minimum rental/i)).toBeVisible()
     await expect(page.getByText(/deposit/i)).toBeVisible()
-    await expect(page.getByText(/towable/i)).toBeVisible()
+    await expect(page.getByRole('term', { name: 'Towable' })).toBeVisible()
   })
 
   test('gallery: main image and clickable thumbnails', async ({ page }) => {

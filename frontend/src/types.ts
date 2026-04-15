@@ -36,13 +36,60 @@ export interface DayAvailability {
   status: DayStatus | null
 }
 
+/** Response from POST /admin/maintenance/cleanup-e2e-test-data */
+export interface E2eCleanupResult {
+  items_deleted: number
+  bookings_processed_for_file_cleanup: number
+}
+
 export interface BookingQuote {
   num_days: number
   base_amount: string
   discount_percent: string
   discounted_subtotal: string
   deposit_amount: string
+  sales_tax_rate_percent: string
+  sales_tax_amount: string
+  rental_total_with_tax: string
+  sales_tax_source: string
   email_sent?: boolean
+}
+
+/** GET /booking-requests/mine — customer Auth0 only */
+export interface CustomerBookingSummary {
+  id: string
+  item_id: string
+  item_title: string
+  item_active: boolean
+  start_date: string
+  end_date: string
+  status: BookingRequestStatus
+  discounted_subtotal?: string | null
+  rental_total_with_tax?: string | null
+  deposit_amount?: string | null
+}
+
+/** GET /booking-requests/me/contact */
+export interface CustomerContactProfile {
+  customer_email: string
+  customer_phone: string
+  customer_first_name: string
+  customer_last_name: string
+  customer_address: string
+}
+
+/** POST /booking-requests/presign — direct-to-Supabase upload flow */
+export interface BookingUploadSlot {
+  path: string
+  signed_url: string
+  token: string
+}
+
+export interface BookingPresignResponse {
+  booking_id: string
+  drivers_license: BookingUploadSlot
+  license_plate: BookingUploadSlot | null
+  expires_in: number
 }
 
 export interface BookingRequestOut {
@@ -63,6 +110,10 @@ export interface BookingRequestOut {
   discount_percent: string | null
   discounted_subtotal: string | null
   deposit_amount: string | null
+  sales_tax_rate_percent?: string | null
+  sales_tax_amount?: string | null
+  rental_total_with_tax?: string | null
+  sales_tax_source?: string | null
   drivers_license_url?: string | null
   license_plate_url?: string | null
 }

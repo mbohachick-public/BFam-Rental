@@ -1,6 +1,7 @@
 import { test as base, expect, type Page, type APIRequestContext } from '@playwright/test'
 
-const API_BASE = 'http://localhost:8000'
+/** Match Playwright webServer / uvicorn default (127.0.0.1) — avoids localhost/IPv6 mismatches. */
+export const API_BASE = 'http://127.0.0.1:8000'
 const ADMIN_TOKEN = process.env.ADMIN_STUB_TOKEN ?? 'dev-admin-change-me'
 
 /* ------------------------------------------------------------------ */
@@ -97,8 +98,8 @@ export async function adminApi(request: APIRequestContext) {
 
 export async function loginAsAdmin(page: Page) {
   await page.goto('/admin/login')
-  await page.getByLabel('Admin token').fill(ADMIN_TOKEN)
-  await page.getByRole('button', { name: 'Continue' }).click()
+  await page.getByLabel(/admin token/i).fill(ADMIN_TOKEN)
+  await page.getByRole('button', { name: /continue with stub token/i }).click()
   await page.waitForURL(/\/admin\/items/)
 }
 

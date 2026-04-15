@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { adminGet, adminPut } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
+import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import { firstOfMonth, iterDaysInMonth, lastOfMonth } from '../../lib/calendar'
 import type { DayAvailability, DayStatus, ItemDetail } from '../../types'
 
@@ -19,6 +20,7 @@ function label(s: DayStatus): string {
 export function AdminAvailabilityPage() {
   const { id } = useParams<{ id: string }>()
   const { adminToken } = useAuth()
+  const adminApiReady = useAdminApiReady()
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
@@ -32,14 +34,14 @@ export function AdminAvailabilityPage() {
   const to = useMemo(() => lastOfMonth(year, month), [year, month])
 
   const loadItem = useCallback(() => {
-    if (!id || !adminToken) return
+    if (!id || !adminApiReady) return
     adminGet<ItemDetail>(`/admin/items/${id}`, adminToken)
       .then(setItem)
       .catch(() => setItem(null))
-  }, [id, adminToken])
+  }, [id, adminApiReady, adminToken])
 
   const loadAvailability = useCallback(() => {
-    if (!id || !adminToken) return
+    if (!id || !adminApiReady) return
     const q = new URLSearchParams({ from, to }).toString()
     adminGet<DayAvailability[]>(`/admin/items/${id}/availability?${q}`, adminToken)
       .then((d) => {
@@ -52,7 +54,7 @@ export function AdminAvailabilityPage() {
       .catch(() => {
         setEdits({})
       })
-  }, [id, from, to, adminToken])
+  }, [id, from, to, adminApiReady, adminToken])
 
   useEffect(() => {
     loadItem()
@@ -72,7 +74,7 @@ export function AdminAvailabilityPage() {
   }
 
   async function saveMonth() {
-    if (!id || !adminToken) return
+    if (!id || !adminApiReady) return
     setSaving(true)
     setError(null)
     setSaved(null)

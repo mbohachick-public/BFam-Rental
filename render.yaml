@@ -1,0 +1,42 @@
+# Render Blueprint: https://render.com/docs/infrastructure-as-code
+# Locked stack: Docker web service (FastAPI) + static site (Vite SPA).
+# After first deploy, set Dashboard env vars marked sync: false (secrets + URLs).
+
+services:
+  - type: web
+    name: bfam-rental-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: ADMIN_STUB_TOKEN
+        sync: false
+      - key: BOOKING_DOCUMENTS_STORAGE
+        value: supabase
+      - key: ITEM_IMAGES_STORAGE
+        value: supabase
+      # Optional: add in the Render dashboard — Auth0, SMTP, sales tax, etc.
+      # See Specs/Deployment-Environments.md and backend/.env.example.
+
+  - type: web
+    name: bfam-rental-web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_ADMIN_STUB_TOKEN
+        sync: false
+      # Optional Auth0 (build-time): set VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID,
+      # VITE_AUTH0_AUDIENCE in the dashboard if you use customer sign-in.
+

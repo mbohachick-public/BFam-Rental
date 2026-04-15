@@ -4,7 +4,7 @@ Website for the trailer rental business.
 
 ## Preview locally
 
-1. **Supabase** — Run `Specs/supabase-schema.sql` (and optionally `Specs/supabase-seed.sql`) in the SQL editor.
+1. **Supabase** — Run `Specs/supabase-setup.sql` in the SQL editor (see file header for parts; optional demo seed and backfill are commented there).
 2. **API** — In `backend/`, copy `.env.example` to `.env`, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, then:
 
    ```bash
@@ -29,7 +29,13 @@ Website for the trailer rental business.
 
 4. **Restart Vite** after changing `frontend/.env` (env is read at startup).
 
+## Production (Render)
+
+- **Hosting:** [Render](https://render.com) — API as a **Docker** web service, SPA as a **static** site. Definitions live in [`render.yaml`](render.yaml); full steps and env vars are in [Deployment: local/test vs production](Specs/Deployment-Environments.md).
+- **CI:** GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — backend tests and frontend production build on pushes and PRs to `main`.
+
 ## Documentation
 
 - [Implementation plan](Specs/Implementation-Plan.md)
 - [Style guide](Specs/Style-Guide.md) (colors, type, components — aligned with `assets/bfam-rental-logo.png`)
+- [Deployment environments](Specs/Deployment-Environments.md) (Render, CORS, Auth0, Supabase)

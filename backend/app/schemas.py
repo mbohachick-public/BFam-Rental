@@ -55,14 +55,21 @@ class BookingQuote(BaseModel):
     discount_percent: Decimal
     discounted_subtotal: Decimal
     deposit_amount: Decimal
+    sales_tax_rate_percent: Decimal
+    sales_tax_amount: Decimal
+    rental_total_with_tax: Decimal
+    sales_tax_source: str
     email_sent: bool = False
 
 
 class BookingQuoteRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     item_id: str
     start_date: date
     end_date: date
     customer_email: EmailStr
+    tax_postal_code: str | None = Field(default=None, max_length=16)
 
 
 class BookingContactForm(BaseModel):
@@ -82,10 +89,72 @@ class BookingRequestCreate(BookingContactForm):
     notes: str | None = None
 
 
+class BookingUploadSlot(BaseModel):
+    """One signed URL for direct upload to Supabase Storage (booking-documents bucket)."""
+
+    path: str
+    signed_url: str
+    token: str
+
+
+class BookingPresignRequest(BookingContactForm):
+    """Start a booking with direct-to-storage uploads; same fields as multipart minus file bodies."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    item_id: str
+    start_date: date
+    end_date: date
+    notes: str | None = None
+    drivers_license_content_type: str = Field(..., min_length=3, max_length=80)
+    license_plate_content_type: str | None = Field(default=None, max_length=80)
+
+
+class BookingPresignResponse(BaseModel):
+    booking_id: str
+    drivers_license: BookingUploadSlot
+    license_plate: BookingUploadSlot | None = None
+    expires_in: int
+
+
+class BookingCompleteBody(BaseModel):
+    """Paths returned from presign; must belong to this booking and match expected prefixes."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    drivers_license_path: str = Field(..., min_length=8, max_length=500)
+    license_plate_path: str | None = Field(default=None, max_length=500)
+
+
 class BookingDeclineBody(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class CustomerBookingSummary(BaseModel):
+    """Customer-facing booking row (no document URLs)."""
+
+    id: str
+    item_id: str
+    item_title: str
+    item_active: bool
+    start_date: date
+    end_date: date
+    status: BookingRequestStatus
+    discounted_subtotal: Decimal | None = None
+    rental_total_with_tax: Decimal | None = None
+    deposit_amount: Decimal | None = None
+
+
+class CustomerContactProfile(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    customer_email: EmailStr
+    customer_phone: str
+    customer_first_name: str
+    customer_last_name: str
+    customer_address: str
 
 
 class BookingRequestOut(BaseModel):
@@ -105,6 +174,10 @@ class BookingRequestOut(BaseModel):
     discount_percent: Decimal | None
     discounted_subtotal: Decimal | None
     deposit_amount: Decimal | None
+    sales_tax_rate_percent: Decimal | None = None
+    sales_tax_amount: Decimal | None = None
+    rental_total_with_tax: Decimal | None = None
+    sales_tax_source: str | None = None
     drivers_license_url: str | None = None
     license_plate_url: str | None = None
     decline_email_sent: bool | None = None
@@ -143,3 +216,12 @@ class DayStatusUpdate(BaseModel):
 
 class AvailabilityBulkUpdate(BaseModel):
     days: list[DayStatusUpdate]
+
+
+class E2eCleanupBody(BaseModel):
+    confirm: bool
+
+
+class E2eCleanupResult(BaseModel):
+    items_deleted: int
+    bookings_processed_for_file_cleanup: int

@@ -1,25 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
-import { adminGet, adminPost, adminPostNoBody } from '../../api/client'
+import { adminDownloadBlob, adminGet, adminPost, adminPostNoBody } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
+import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type { BookingRequestOut } from '../../types'
 
-/** Append stub admin token so `<a target="_blank">` can open API file routes (local mode). */
-function bookingFileHref(url: string | null | undefined, adminToken: string | null): string | undefined {
-  if (!url) return undefined
-  if (!adminToken) return url
+async function openBookingDocument(url: string, stubToken: string | null, label: string) {
   try {
-    const u = new URL(url)
-    if (
-      u.pathname.includes('/files/drivers-license') ||
-      u.pathname.includes('/files/license-plate')
-    ) {
-      u.searchParams.set('admin_token', adminToken)
-      return u.toString()
-    }
-  } catch {
-    /* relative or invalid */
+    const blob = await adminDownloadBlob(url, stubToken)
+    const obj = URL.createObjectURL(blob)
+    const w = window.open(obj, '_blank', 'noopener,noreferrer')
+    if (!w) URL.revokeObjectURL(obj)
+    else setTimeout(() => URL.revokeObjectURL(obj), 120_000)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : `Could not open ${label}`)
   }
-  return url
 }
 
 function money(s: string | null | undefined) {
@@ -32,6 +26,7 @@ function money(s: string | null | undefined) {
 
 export function AdminBookingsPage() {
   const { adminToken } = useAuth()
+  const adminApiReady = useAdminApiReady()
   const [rows, setRows] = useState<BookingRequestOut[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -40,25 +35,22 @@ export function AdminBookingsPage() {
   const [declineError, setDeclineError] = useState<string | null>(null)
 
   const load = useCallback(() => {
-    if (!adminToken) return
+    if (!adminApiReady) return
     adminGet<BookingRequestOut[]>('/admin/booking-requests', adminToken)
       .then(setRows)
       .catch((e: Error) => setError(e.message))
-  }, [adminToken])
+  }, [adminApiReady, adminToken])
 
   useEffect(() => {
     load()
   }, [load])
 
   async function accept(id: string) {
-    if (!adminToken) return
+    if (!adminApiReady) return
     setBusyId(id)
     setError(null)
     try {
-      await adminPostNoBody<BookingRequestOut>(
-        `/admin/booking-requests/${id}/accept`,
-        adminToken,
-      )
+      await adminPostNoBody<BookingRequestOut>(`/admin/booking-requests/${id}/accept`, adminToken)
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Accept failed')
@@ -80,7 +72,7 @@ export function AdminBookingsPage() {
   }
 
   async function confirmDecline() {
-    if (!adminToken || !declineForId) return
+    if (!adminApiReady || !declineForId) return
     const reason = declineReason.trim()
     if (!reason) {
       setDeclineError('Please enter a reason for declining.')
@@ -138,32 +130,46 @@ export function AdminBookingsPage() {
               </div>
             ) : null}
             <div className="muted">
-              Rental {money(r.discounted_subtotal)} · Deposit {money(r.deposit_amount)}
+              {r.sales_tax_amount != null && r.rental_total_with_tax != null ? (
+                <>
+                  Subtotal {money(r.discounted_subtotal)} · Tax {money(r.sales_tax_amount)}
+                  {r.sales_tax_rate_percent != null
+                    ? ` (${Number(r.sales_tax_rate_percent)}%)`
+                    : ''}{' '}
+                  · Total {money(r.rental_total_with_tax)} · Deposit {money(r.deposit_amount)}
+                </>
+              ) : (
+                <>
+                  Rental {money(r.discounted_subtotal)} · Deposit {money(r.deposit_amount)}
+                </>
+              )}
             </div>
             <div className="admin-booking-docs small">
               {r.drivers_license_url ? (
-                <a
-                  href={bookingFileHref(r.drivers_license_url, adminToken) ?? '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
                   className="doc-link"
+                  onClick={() =>
+                    void openBookingDocument(r.drivers_license_url!, adminToken, "driver's license")
+                  }
                 >
                   Driver’s license
-                </a>
+                </button>
               ) : (
                 <span className="muted">No license on file</span>
               )}
               {r.license_plate_url ? (
                 <>
                   {' · '}
-                  <a
-                    href={bookingFileHref(r.license_plate_url, adminToken) ?? '#'}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
                     className="doc-link"
+                    onClick={() =>
+                      void openBookingDocument(r.license_plate_url!, adminToken, 'license plate photo')
+                    }
                   >
                     License plate
-                  </a>
+                  </button>
                 </>
               ) : null}
             </div>

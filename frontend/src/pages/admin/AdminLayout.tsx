@@ -1,11 +1,11 @@
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext'
+import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 
 export function AdminLayout() {
-  const { adminToken } = useAuth()
   const location = useLocation()
+  const adminApiReady = useAdminApiReady()
 
-  if (!adminToken) {
+  if (!adminApiReady) {
     return <Navigate to="/admin/login" replace state={{ from: location.pathname }} />
   }
 

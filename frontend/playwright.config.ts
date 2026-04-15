@@ -1,4 +1,12 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import dotenv from 'dotenv'
 import { defineConfig, devices } from '@playwright/test'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+/* Load frontend/.env so VITE_* and E2E_* are visible to tests and inherited by webServer. */
+dotenv.config({ path: path.join(__dirname, '.env'), override: true })
 
 export default defineConfig({
   testDir: './e2e',

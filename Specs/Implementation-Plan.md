@@ -9,7 +9,7 @@ This document aligns user stories in `BFam Rental Stories.txt` with architecture
 | Database | **Supabase** (managed Postgres; optional Storage for item images) |
 | Frontend | **Vite + React** with **TypeScript** |
 | Backend | **Python** (**FastAPI**); **all reads and writes to the database go through Python** — the React app never holds Supabase DB credentials or calls PostgREST for data |
-| Authentication | **Auth0** in production; **stubbed** for now (mock roles / placeholder UI) |
+| Authentication | **Auth0** for **customers** — **Free** tier for now; **Google** social + **email/password** (database connection); FastAPI validates JWTs. **Admin** still **stubbed** (`X-Admin-Token`) until upgraded |
 
 ## Python stack (recommended)
 
@@ -51,7 +51,7 @@ flowchart LR
 ```
 
 - The React client calls only the Python API for catalog, filters, item detail, calendar data, booking requests, and admin operations.
-- Python uses a Supabase **service role** or connection string to access Postgres (and Storage if used). Enforce booking rules, discount logic, and date validation on the server.
+- Python uses a Supabase **service role** or connection string to access Postgres (and Storage if used). Enforce booking rules and date validation on the server.
 
 ## User stories → capabilities
 
@@ -61,8 +61,11 @@ flowchart LR
 - Item detail shows: Cost Per Day, Minimum Day Rental, Category, images (array), Description, Title, Deposit Amount, User Requirements.
 - Per-item calendar: one status per date — *Out for Use*, *Booked*, *Open for Booking*, *Readying for Use*.
 - Request a booking only for dates that are *Open for Booking*, within the next **60 days** from the request date.
-- Show rental pricing with duration discount: **5% per day**, **maximum 15%**.
+- Show rental pricing as **cost per day × number of days** (rental subtotal), plus deposit, plus **sales tax** on the taxable portion as a separate line.
+- **Sales tax on quotes (requirement):** Compute tax on each `POST /booking-requests/quote` (and keep booking/confirmation consistent with the same rules). **Prefer** an **official government-published API or rate service** for the business’s filing jurisdiction (e.g. state DOR / local tax authority where available). There is **no single U.S. federal** sales-tax API for local retail; the chosen source must be documented in code or README (URL, jurisdiction, and what is taxed). **No caching** of tax rates in the first version—each quote triggers a **fresh fetch** (accept latency tradeoff). If a jurisdiction lacks a usable API, document the fallback (e.g. official published rate tables updated manually, or a designated government data feed).
 - **Email** (required) and **phone** (required) on booking requests; **quote** is emailed to that address when **SMTP** is configured on the API.
+- When customer Auth0 is enabled: **My rentals** — list the signed-in customer’s booking requests (Bearer JWT); **Contact prefill** — `GET` endpoint returns the latest saved contact fields from prior bookings for that identity (driver’s license and license plate are never prefilled or reused from the API).
+- When customer Auth0 is **not** configured, the SPA does not expose my-rentals or prefill (anonymous dev mode).
 
 **Admin**
 
@@ -71,14 +74,21 @@ flowchart LR
 - Accept or **decline** proposed bookings (decline captures a reason, emails the customer with item and dates, sets requested days back to *Open for Booking*).
 - Update each item’s per-date status.
 
+**Default availability window**
+
+- Creating an item via `POST /admin/items` **seeds** `item_day_status` for every day from **today through today + 60** (inclusive), each as `open_for_booking`, matching the customer booking window.
+- On **GET** `/items/{id}/availability`, **GET** `/admin/items/{id}/availability`, **GET** `/items` with `open_from` / `open_to`, and before **quote** / **booking** validation, the API **upserts any missing** days in that same window as `open_for_booking` so the rolling horizon stays filled as calendar time moves (existing statuses such as `booked` are not overwritten).
+- **Legacy databases:** uncomment and run **PART 5** in `Specs/supabase-setup.sql` once to backfill missing rows for items that predate seeding.
+
 **Data model (items)**
 
-- `items.active` (boolean, default `true`): when `false`, the item is hidden from customers; run `Specs/supabase-migration-item-active.sql` on existing databases.
+- `items.active` (boolean, default `true`): when `false`, the item is hidden from customers; older databases can run **PART 2** in `Specs/supabase-setup.sql` to add the column idempotently.
 
 ## UI wireframes (summary)
 
 - **Catalog**: responsive grid; attribute-driven filters; optional search later.
-- **Item detail**: gallery, full attribute block, calendar with legend, date selection for booking, quote line showing discount cap, submit booking request.
+- **Item detail**: gallery, full attribute block, calendar with legend, date selection for booking, quote with rental total, **tax line**, and deposit, submit booking request; signed-in customers get contact prefill from the server (except license uploads).
+- **My rentals** (`/my-rentals`): signed-in customer list of their requests with link to item when applicable (only when Auth0 is enabled in the app).
 - **Admin**: item list and create/edit forms; booking request queue with accept and decline (reason + customer email); per-item (or item-scoped) calendar editor for status by date.
 - **Auth stub**: Sign-in / account placeholders without real Auth0 until enabled.
 
@@ -95,6 +105,8 @@ Define concrete routes during implementation; initial shape:
 - `POST /booking-requests` — `multipart/form-data`: `item_id`, `start_date`, `end_date`, required `customer_email`, `customer_phone`, `customer_first_name`, `customer_last_name`, `customer_address`, optional `notes`, required file `drivers_license`; if the item is **towable**, required file `license_plate`. Files go to Supabase Storage **`booking-documents`** by default (`BOOKING_DOCUMENTS_STORAGE=supabase`); use `BOOKING_DOCUMENTS_STORAGE=local` and `BOOKING_DOCUMENTS_LOCAL_DIR` for disk-only dev. Sends booking confirmation email when SMTP is configured.
 - `GET /admin/booking-requests/{id}/files/drivers-license` | `license-plate` — admin-only; serves local file or redirects to a signed Storage URL.
 - `POST /booking-requests/quote` — JSON: `item_id`, `start_date`, `end_date`, required `customer_email`; returns quote plus `email_sent` when SMTP delivers the quote email.
+- `GET /booking-requests/mine` — **Requires** customer Auth0 (Bearer). Returns booking summaries for the JWT `sub` (no document URLs). **501** when Auth0 is not configured on the API.
+- `GET /booking-requests/me/contact` — **Requires** customer Auth0 (Bearer). Returns latest contact fields from the customer’s prior bookings for form prefill, or **404** if none. **501** when Auth0 is not configured.
 - Items include **`towable`** (boolean); admin sets it via item create/update.
 - Admin (stub-guarded): `POST/PATCH /admin/items`, `POST /admin/booking-requests/{id}/accept`, `POST /admin/booking-requests/{id}/decline` (JSON `reason`), `PUT /admin/items/{id}/availability` (or per-day PATCH).
 
@@ -105,17 +117,17 @@ Tables or equivalent concepts (names illustrative):
 - **items** — scalar attributes (title, description, category, cost_per_day, minimum_day_rental, deposit_amount, user_requirements, …).
 - **item_images** — ordered images per item (or JSON array if kept simple early).
 - **item_day_status** — `item_id`, `date`, `status` enum (four values).
-- **booking_requests** — item, date range, status (pending/accepted/rejected), optional **decline_reason**, pricing snapshot, **customer_email**, **customer_phone**, **customer_first_name**, **customer_last_name**, **customer_address**, document storage paths, notes.
+- **booking_requests** — item, date range, status (pending/accepted/rejected), optional **decline_reason**, pricing snapshot, **customer_email**, **customer_phone**, **customer_first_name**, **customer_last_name**, **customer_address**, optional **customer_auth0_sub** (JWT `sub` when Auth0 is enabled), document storage paths, notes.
 
 ## Delivery phases
 
 1. **Monorepo layout** — `frontend/` (Vite+React+TS), `backend/` (Python), shared env documentation; Supabase project and schema migration path.
-2. **Stub auth** — React context for “customer” vs “admin”; no Auth0 yet.
+2. **Auth** — Admin: stub `X-Admin-Token`. Customers: optional Auth0 SPA + JWT on quote/booking when `AUTH0_*` / `VITE_AUTH0_*` are set; otherwise anonymous quote/booking still allowed for dev.
 3. **Read APIs** — items list, filters, item by id, availability range.
 4. **Customer UI** — catalog, detail, calendar display.
-5. **Booking** — POST booking request with server-side validation and discount calculation.
+5. **Booking** — POST booking request with server-side validation and rental total calculation.
 6. **Admin UI + APIs** — CRUD items, edit day status, accept bookings.
-7. **Polish** — responsive QA, errors, empty states; then real Auth0 and securing admin routes.
+7. **Polish** — responsive QA, errors, empty states; tighten Auth0 (production tenants) and replace admin stub when ready.
 
 ## Related files
 

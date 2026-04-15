@@ -1,23 +1,47 @@
 from datetime import date
 from decimal import Decimal
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import ValidationError
 from supabase import Client
 
 from app.config import get_settings
-from app.deps import get_supabase_client
+from app.deps import customer_jwt_claims, get_supabase_client, require_customer_jwt
 from app.schemas import (
+    BookingCompleteBody,
     BookingContactForm,
+    BookingPresignRequest,
+    BookingPresignResponse,
     BookingQuote,
     BookingQuoteRequest,
     BookingRequestOut,
     BookingRequestStatus,
+    BookingUploadSlot,
+    CustomerBookingSummary,
+    CustomerContactProfile,
     DayStatus,
 )
 from app.services.booking import compute_rental_amounts, validate_booking_dates
-from app.services.booking_documents import ext_for_content_type, validate_image_upload
-from app.services.booking_storage import save_booking_document
+from app.services.sales_tax import (
+    compute_sales_tax_amount,
+    lookup_sales_tax_rate_percent,
+    resolve_postal_for_tax,
+)
+from app.services.item_availability_seed import ensure_booking_window_day_status
+from app.services.booking_documents import (
+    ext_for_content_type,
+    normalize_booking_image_content_type,
+    validate_image_upload,
+)
+from app.services.booking_storage import (
+    BOOKING_UPLOAD_PRESIGN_EXPIRES_SEC,
+    assert_booking_document_path,
+    create_presigned_booking_upload_slot,
+    remove_booking_storage_prefix,
+    save_booking_document,
+    verify_booking_document_uploaded,
+)
 from app.services.booking_response import booking_out_from_row
 from app.services.dates import iter_days_inclusive
 from app.services.quote_email import send_booking_received_email, send_quote_email
@@ -38,6 +62,52 @@ def _read_upload(upload: UploadFile) -> tuple[bytes, str | None]:
     return raw, upload.content_type
 
 
+def _sales_tax_parts(
+    settings,
+    discounted_subtotal: Decimal,
+    *,
+    tax_postal_code: str | None,
+    customer_address: str | None,
+) -> tuple[Decimal, Decimal, Decimal, str]:
+    postal = resolve_postal_for_tax(
+        explicit_zip=tax_postal_code,
+        customer_address=customer_address,
+        default_zip=settings.sales_tax_default_postal_code,
+    )
+    rate_pct, source = lookup_sales_tax_rate_percent(settings, postal_code=postal)
+    tax_amt = compute_sales_tax_amount(discounted_subtotal, rate_pct)
+    total = (discounted_subtotal + tax_amt).quantize(Decimal("0.01"))
+    return rate_pct, tax_amt, total, source
+
+
+def _sales_tax_or_http(
+    settings,
+    discounted_subtotal: Decimal,
+    *,
+    tax_postal_code: str | None,
+    customer_address: str | None,
+) -> tuple[Decimal, Decimal, Decimal, str]:
+    try:
+        return _sales_tax_parts(
+            settings,
+            discounted_subtotal,
+            tax_postal_code=tax_postal_code,
+            customer_address=customer_address,
+        )
+    except ValueError as e:
+        detail = str(e)
+        if "Sales tax is not configured" in detail:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail) from e
+        if "Sales tax response was not valid JSON" in detail or "Tax API JSON" in detail:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=detail) from e
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail) from e
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=f"Sales tax lookup failed: {e}",
+        ) from e
+
+
 def _validation_detail(exc: ValidationError) -> str:
     parts: list[str] = []
     for err in exc.errors():
@@ -46,36 +116,28 @@ def _validation_detail(exc: ValidationError) -> str:
     return "; ".join(parts) if parts else "Invalid input"
 
 
-@router.post("", response_model=BookingRequestOut, status_code=status.HTTP_201_CREATED)
-def create_booking_request(
-    item_id: str = Form(),
-    start_date: date = Form(),
-    end_date: date = Form(),
-    customer_email: str = Form(),
-    customer_phone: str = Form(),
-    customer_first_name: str = Form(),
-    customer_last_name: str = Form(),
-    customer_address: str = Form(),
-    notes: str | None = Form(None),
-    drivers_license: UploadFile = File(),
-    license_plate: UploadFile | None = File(default=None),
-    client: Client = Depends(get_supabase_client),
-) -> BookingRequestOut:
-    settings = get_settings()
-    try:
-        contact = BookingContactForm(
-            customer_email=customer_email,
-            customer_phone=customer_phone,
-            customer_first_name=customer_first_name,
-            customer_last_name=customer_last_name,
-            customer_address=customer_address,
-        )
-    except ValidationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_validation_detail(e),
-        ) from e
+def _dec_opt(v: object | None) -> Decimal | None:
+    if v is None:
+        return None
+    return Decimal(str(v))
 
+
+def _validated_booking_insert_row(
+    client: Client,
+    settings,
+    customer: dict | None,
+    item_id: str,
+    start_date: date,
+    end_date: date,
+    contact: BookingContactForm,
+    notes: str | None,
+) -> tuple[dict, str, bool, int, Decimal, Decimal, Decimal, Decimal, Decimal, str, Decimal]:
+    """
+    Validate item/dates/contact/tax and build the insert dict (no document paths).
+    Returns insert_row, item_title, towable, num_days, disc_sub, tax_rate, tax_amt,
+    rental_w_tax, tax_src, dep.
+    """
+    clean_notes = (notes or "").strip() or None
     item_res = (
         client.table("items")
         .select("id,cost_per_day,minimum_day_rental,deposit_amount,towable,title,active")
@@ -91,32 +153,14 @@ def create_booking_request(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     towable = bool(item.get("towable", False))
     item_title = str(item.get("title") or "Rental item")
-    clean_notes = (notes or "").strip() or None
     cost = _decimal(item["cost_per_day"])
     min_days = int(item["minimum_day_rental"])
     deposit = _decimal(item["deposit_amount"])
 
-    if not drivers_license.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A driver's license image is required.",
-        )
-
-    lp_has_file = bool(license_plate and license_plate.filename)
-    if towable and not lp_has_file:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A license plate image is required for towable items.",
-        )
-    if not towable and lp_has_file:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="License plate image is only allowed for towable items.",
-        )
-
     today = _today_utc()
     days = iter_days_inclusive(start_date, end_date)
 
+    ensure_booking_window_day_status(client, item_id, today)
     status_res = (
         client.table("item_day_status")
         .select("day,status")
@@ -137,29 +181,459 @@ def create_booking_request(
 
     num_days = len(days)
     base, disc_pct, disc_sub, dep = compute_rental_amounts(cost, num_days, deposit)
+    tax_rate, tax_amt, rental_w_tax, tax_src = _sales_tax_or_http(
+        settings,
+        disc_sub,
+        tax_postal_code=None,
+        customer_address=contact.customer_address,
+    )
 
-    insert_res = (
-        client.table("booking_requests")
-        .insert(
-            {
-                "item_id": item_id,
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "status": BookingRequestStatus.pending.value,
-                "customer_email": str(contact.customer_email),
-                "customer_phone": contact.customer_phone,
-                "customer_first_name": contact.customer_first_name,
-                "customer_last_name": contact.customer_last_name,
-                "customer_address": contact.customer_address,
-                "notes": clean_notes,
-                "base_amount": float(base),
-                "discount_percent": float(disc_pct),
-                "discounted_subtotal": float(disc_sub),
-                "deposit_amount": float(dep),
-            }
+    auth_sub: str | None = None
+    if customer is not None:
+        raw_sub = customer.get("sub")
+        auth_sub = str(raw_sub).strip() if raw_sub else None
+
+    insert_row: dict = {
+        "item_id": item_id,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "status": BookingRequestStatus.pending.value,
+        "customer_email": str(contact.customer_email),
+        "customer_phone": contact.customer_phone,
+        "customer_first_name": contact.customer_first_name,
+        "customer_last_name": contact.customer_last_name,
+        "customer_address": contact.customer_address,
+        "notes": clean_notes,
+        "base_amount": float(base),
+        "discount_percent": float(disc_pct),
+        "discounted_subtotal": float(disc_sub),
+        "deposit_amount": float(dep),
+        "sales_tax_rate_percent": float(tax_rate),
+        "sales_tax_amount": float(tax_amt),
+        "rental_total_with_tax": float(rental_w_tax),
+        "sales_tax_source": tax_src,
+    }
+    if auth_sub:
+        insert_row["customer_auth0_sub"] = auth_sub
+
+    return (
+        insert_row,
+        item_title,
+        towable,
+        num_days,
+        disc_sub,
+        tax_rate,
+        tax_amt,
+        rental_w_tax,
+        tax_src,
+        dep,
+    )
+
+
+def _booking_store_error_detail(settings) -> str:
+    if settings.booking_documents_storage == "local":
+        return (
+            "Could not save booking documents to disk. Check that "
+            f"BOOKING_DOCUMENTS_LOCAL_DIR ({settings.booking_documents_local_dir}) is writable."
         )
+    return (
+        "Could not store booking documents in Supabase Storage. Ensure the "
+        "'booking-documents' bucket exists and policies allow the service role to upload."
+    )
+
+
+@router.get("/mine", response_model=list[CustomerBookingSummary])
+def list_my_booking_requests(
+    customer: dict = Depends(require_customer_jwt),
+    client: Client = Depends(get_supabase_client),
+) -> list[CustomerBookingSummary]:
+    sub = str(customer["sub"])
+    br = (
+        client.table("booking_requests")
+        .select("*")
+        .eq("customer_auth0_sub", sub)
+        .order("created_at", desc=True)
         .execute()
     )
+    rows = br.data or []
+    if not rows:
+        return []
+    item_ids = list({str(r["item_id"]) for r in rows})
+    ir = client.table("items").select("id,title,active").in_("id", item_ids).execute()
+    items_map: dict[str, dict] = {str(it["id"]): it for it in (ir.data or [])}
+    out: list[CustomerBookingSummary] = []
+    for r in rows:
+        iid = str(r["item_id"])
+        it = items_map.get(iid) or {}
+        title = str(it.get("title") or "Rental item")
+        active = bool(it.get("active", True))
+        out.append(
+            CustomerBookingSummary(
+                id=str(r["id"]),
+                item_id=iid,
+                item_title=title,
+                item_active=active,
+                start_date=date.fromisoformat(str(r["start_date"])),
+                end_date=date.fromisoformat(str(r["end_date"])),
+                status=BookingRequestStatus(r["status"]),
+                discounted_subtotal=_dec_opt(r.get("discounted_subtotal")),
+                rental_total_with_tax=_dec_opt(r.get("rental_total_with_tax")),
+                deposit_amount=_dec_opt(r.get("deposit_amount")),
+            )
+        )
+    return out
+
+
+@router.get("/me/contact", response_model=CustomerContactProfile)
+def get_my_contact_profile(
+    customer: dict = Depends(require_customer_jwt),
+    client: Client = Depends(get_supabase_client),
+) -> CustomerContactProfile:
+    sub = str(customer["sub"])
+    res = (
+        client.table("booking_requests")
+        .select(
+            "customer_email,customer_phone,customer_first_name,customer_last_name,customer_address,created_at"
+        )
+        .eq("customer_auth0_sub", sub)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    data = res.data or []
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No saved contact from previous bookings.",
+        )
+    row = data[0]
+    try:
+        return CustomerContactProfile.model_validate(
+            {
+                "customer_email": row.get("customer_email"),
+                "customer_phone": row.get("customer_phone") or "",
+                "customer_first_name": row.get("customer_first_name") or "",
+                "customer_last_name": row.get("customer_last_name") or "",
+                "customer_address": row.get("customer_address") or "",
+            }
+        )
+    except ValidationError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No valid saved contact from previous bookings.",
+        ) from None
+
+
+@router.post("/presign", response_model=BookingPresignResponse, status_code=status.HTTP_201_CREATED)
+def presign_booking_uploads(
+    body: BookingPresignRequest,
+    customer: dict | None = Depends(customer_jwt_claims),
+    client: Client = Depends(get_supabase_client),
+) -> BookingPresignResponse:
+    """Create a booking row and signed Supabase upload URLs (no file bytes on this API)."""
+    settings = get_settings()
+    if settings.booking_documents_storage != "supabase":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Presigned uploads require BOOKING_DOCUMENTS_STORAGE=supabase. "
+                "For local storage, use POST /booking-requests with multipart form data."
+            ),
+        )
+    try:
+        contact = BookingContactForm(
+            customer_email=body.customer_email,
+            customer_phone=body.customer_phone,
+            customer_first_name=body.customer_first_name,
+            customer_last_name=body.customer_last_name,
+            customer_address=body.customer_address,
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_validation_detail(e),
+        ) from e
+
+    try:
+        dl_type = normalize_booking_image_content_type(
+            body.drivers_license_content_type, "Driver's license"
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    lp_ct_raw = (body.license_plate_content_type or "").strip()
+    lp_type_norm = None
+    if lp_ct_raw:
+        try:
+            lp_type_norm = normalize_booking_image_content_type(lp_ct_raw, "License plate")
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    insert_row, _item_title, towable, _num_days, _disc_sub, _tax_rate, _tax_amt, _rental_w_tax, _tax_src, _dep = (
+        _validated_booking_insert_row(
+            client,
+            settings,
+            customer,
+            body.item_id,
+            body.start_date,
+            body.end_date,
+            contact,
+            body.notes,
+        )
+    )
+    if towable and lp_type_norm is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="license_plate_content_type is required for towable items.",
+        )
+    if not towable and lp_type_norm is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="license_plate_content_type is only allowed for towable items.",
+        )
+
+    insert_res = client.table("booking_requests").insert(insert_row).execute()
+    data = insert_res.data
+    if not data:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Insert failed")
+    row = data[0]
+    bid = str(row["id"])
+
+    dl_ext = ext_for_content_type(dl_type)
+    path_dl = f"{bid}/drivers_license{dl_ext}"
+    dl_slot_out: BookingUploadSlot
+    lp_slot_out: BookingUploadSlot | None = None
+    try:
+        dl_slot_raw = create_presigned_booking_upload_slot(client, path_dl)
+        dl_slot_out = BookingUploadSlot.model_validate(dl_slot_raw)
+        if towable and lp_type_norm is not None:
+            lp_ext = ext_for_content_type(lp_type_norm)
+            path_lp = f"{bid}/license_plate{lp_ext}"
+            lp_slot_raw = create_presigned_booking_upload_slot(client, path_lp)
+            lp_slot_out = BookingUploadSlot.model_validate(lp_slot_raw)
+    except Exception as exc:
+        try:
+            client.table("booking_requests").delete().eq("id", bid).execute()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not create signed upload URLs. Check Supabase Storage configuration.",
+        ) from exc
+
+    return BookingPresignResponse(
+        booking_id=bid,
+        drivers_license=dl_slot_out,
+        license_plate=lp_slot_out,
+        expires_in=BOOKING_UPLOAD_PRESIGN_EXPIRES_SEC,
+    )
+
+
+@router.post("/{booking_id}/complete", response_model=BookingRequestOut)
+def complete_booking_uploads(
+    booking_id: str,
+    body: BookingCompleteBody,
+    _customer: dict | None = Depends(customer_jwt_claims),
+    client: Client = Depends(get_supabase_client),
+) -> BookingRequestOut:
+    """After direct-to-Supabase uploads, verify objects and finalize the booking row."""
+    settings = get_settings()
+    if settings.booking_documents_storage != "supabase":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Complete step is only used when BOOKING_DOCUMENTS_STORAGE=supabase.",
+        )
+    res = (
+        client.table("booking_requests")
+        .select("*")
+        .eq("id", booking_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    row = rows[0]
+    if row.get("status") != BookingRequestStatus.pending.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending bookings can be completed.",
+        )
+    if row.get("drivers_license_path") or row.get("license_plate_path"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Booking documents are already attached.",
+        )
+
+    item_res = (
+        client.table("items")
+        .select("title,towable")
+        .eq("id", row["item_id"])
+        .limit(1)
+        .execute()
+    )
+    it_rows = item_res.data or []
+    towable = bool(it_rows[0].get("towable")) if it_rows else False
+    item_title = str(it_rows[0].get("title") or "Rental item") if it_rows else "Rental item"
+
+    path_lp: str | None = None
+    try:
+        assert_booking_document_path(booking_id, body.drivers_license_path, role="drivers_license")
+        verify_booking_document_uploaded(client, body.drivers_license_path, "Driver's license")
+        if towable:
+            if not body.license_plate_path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="license_plate_path is required for towable items.",
+                )
+            assert_booking_document_path(booking_id, body.license_plate_path, role="license_plate")
+            verify_booking_document_uploaded(client, body.license_plate_path, "License plate")
+            path_lp = body.license_plate_path
+        elif body.license_plate_path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="license_plate_path is not allowed for non-towable items.",
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    client.table("booking_requests").update(
+        {"drivers_license_path": body.drivers_license_path, "license_plate_path": path_lp}
+    ).eq("id", booking_id).execute()
+
+    res2 = client.table("booking_requests").select("*").eq("id", booking_id).limit(1).execute()
+    final = res2.data[0]
+    start_d = date.fromisoformat(str(final["start_date"]))
+    end_d = date.fromisoformat(str(final["end_date"]))
+    num_days = len(iter_days_inclusive(start_d, end_d))
+    disc_sub = _decimal(final["discounted_subtotal"])
+    tax_rate = _decimal(final["sales_tax_rate_percent"])
+    tax_amt = _decimal(final["sales_tax_amount"])
+    rental_w_tax = _decimal(final["rental_total_with_tax"])
+    tax_src = str(final.get("sales_tax_source") or "")
+    dep = _decimal(final["deposit_amount"])
+
+    send_booking_received_email(
+        settings,
+        to_addr=str(final.get("customer_email") or ""),
+        item_title=item_title,
+        start_date=start_d.isoformat(),
+        end_date=end_d.isoformat(),
+        num_days=num_days,
+        discounted_subtotal=disc_sub,
+        sales_tax_rate_percent=tax_rate,
+        sales_tax_amount=tax_amt,
+        rental_total_with_tax=rental_w_tax,
+        sales_tax_source=tax_src,
+        deposit_amount=dep,
+    )
+    return booking_out_from_row(client, final, sign_document_urls=False)
+
+
+@router.delete("/{booking_id}/abandon", status_code=status.HTTP_204_NO_CONTENT)
+def abandon_booking_upload(
+    booking_id: str,
+    client: Client = Depends(get_supabase_client),
+) -> None:
+    """Drop a pending booking that never completed uploads (cleanup)."""
+    settings = get_settings()
+    res = (
+        client.table("booking_requests")
+        .select("id,status,drivers_license_path,license_plate_path")
+        .eq("id", booking_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    row = rows[0]
+    if row.get("status") != BookingRequestStatus.pending.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending bookings can be abandoned.",
+        )
+    if row.get("drivers_license_path") or row.get("license_plate_path"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Booking already has documents attached.",
+        )
+    remove_booking_storage_prefix(settings, client, booking_id)
+    client.table("booking_requests").delete().eq("id", booking_id).execute()
+
+
+@router.post("", response_model=BookingRequestOut, status_code=status.HTTP_201_CREATED)
+def create_booking_request(
+    customer: dict | None = Depends(customer_jwt_claims),
+    item_id: str = Form(),
+    start_date: date = Form(),
+    end_date: date = Form(),
+    customer_email: str = Form(),
+    customer_phone: str = Form(),
+    customer_first_name: str = Form(),
+    customer_last_name: str = Form(),
+    customer_address: str = Form(),
+    notes: str | None = Form(None),
+    drivers_license: UploadFile = File(),
+    license_plate: UploadFile | None = File(default=None),
+    client: Client = Depends(get_supabase_client),
+) -> BookingRequestOut:
+    """Multipart booking create (use when BOOKING_DOCUMENTS_STORAGE=local)."""
+    settings = get_settings()
+    if settings.booking_documents_storage != "local":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Multipart booking upload is only for BOOKING_DOCUMENTS_STORAGE=local. "
+                "With Supabase Storage, use POST /booking-requests/presign then complete."
+            ),
+        )
+    try:
+        contact = BookingContactForm(
+            customer_email=customer_email,
+            customer_phone=customer_phone,
+            customer_first_name=customer_first_name,
+            customer_last_name=customer_last_name,
+            customer_address=customer_address,
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_validation_detail(e),
+        ) from e
+
+    if not drivers_license.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A driver's license image is required.",
+        )
+
+    insert_row, item_title, towable, num_days, disc_sub, tax_rate, tax_amt, rental_w_tax, tax_src, dep = (
+        _validated_booking_insert_row(
+            client,
+            settings,
+            customer,
+            item_id,
+            start_date,
+            end_date,
+            contact,
+            notes,
+        )
+    )
+
+    lp_has_file = bool(license_plate and license_plate.filename)
+    if towable and not lp_has_file:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A license plate image is required for towable items.",
+        )
+    if not towable and lp_has_file:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="License plate image is only allowed for towable items.",
+        )
+
+    insert_res = client.table("booking_requests").insert(insert_row).execute()
     data = insert_res.data
     if not data:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Insert failed")
@@ -209,29 +683,20 @@ def create_booking_request(
         start_date=start_date.isoformat(),
         end_date=end_date.isoformat(),
         num_days=num_days,
-        base_amount=base,
-        discount_percent=disc_pct,
         discounted_subtotal=disc_sub,
+        sales_tax_rate_percent=tax_rate,
+        sales_tax_amount=tax_amt,
+        rental_total_with_tax=rental_w_tax,
+        sales_tax_source=tax_src,
         deposit_amount=dep,
     )
     return booking_out_from_row(client, final, sign_document_urls=False)
 
 
-def _booking_store_error_detail(settings) -> str:
-    if settings.booking_documents_storage == "local":
-        return (
-            "Could not save booking documents to disk. Check that "
-            f"BOOKING_DOCUMENTS_LOCAL_DIR ({settings.booking_documents_local_dir}) is writable."
-        )
-    return (
-        "Could not store booking documents in Supabase Storage. Ensure the "
-        "'booking-documents' bucket exists and policies allow the service role to upload."
-    )
-
-
 @router.post("/quote", response_model=BookingQuote)
 def quote_booking(
     body: BookingQuoteRequest,
+    _customer: dict | None = Depends(customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingQuote:
     """Preview pricing; emails the quote when SMTP is configured."""
@@ -256,6 +721,7 @@ def quote_booking(
 
     today = _today_utc()
     days = iter_days_inclusive(body.start_date, body.end_date)
+    ensure_booking_window_day_status(client, body.item_id, today)
     status_res = (
         client.table("item_day_status")
         .select("day,status")
@@ -276,6 +742,12 @@ def quote_booking(
 
     num_days = len(days)
     base, disc_pct, disc_sub, dep = compute_rental_amounts(cost, num_days, deposit)
+    tax_rate, tax_amt, rental_w_tax, tax_src = _sales_tax_or_http(
+        settings,
+        disc_sub,
+        tax_postal_code=body.tax_postal_code,
+        customer_address=None,
+    )
     emailed = send_quote_email(
         settings,
         to_addr=str(body.customer_email),
@@ -283,9 +755,11 @@ def quote_booking(
         start_date=body.start_date.isoformat(),
         end_date=body.end_date.isoformat(),
         num_days=num_days,
-        base_amount=base,
-        discount_percent=disc_pct,
         discounted_subtotal=disc_sub,
+        sales_tax_rate_percent=tax_rate,
+        sales_tax_amount=tax_amt,
+        rental_total_with_tax=rental_w_tax,
+        sales_tax_source=tax_src,
         deposit_amount=dep,
     )
     return BookingQuote(
@@ -294,5 +768,9 @@ def quote_booking(
         discount_percent=disc_pct,
         discounted_subtotal=disc_sub,
         deposit_amount=dep,
+        sales_tax_rate_percent=tax_rate,
+        sales_tax_amount=tax_amt,
+        rental_total_with_tax=rental_w_tax,
+        sales_tax_source=tax_src,
         email_sent=emailed,
     )

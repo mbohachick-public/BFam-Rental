@@ -182,11 +182,7 @@ class FakeTable:
                     # Simple PK-based upsert
                     found = False
                     for existing in table_rows:
-                        if existing.get("id") == record.get("id"):
-                            existing.update(record)
-                            found = True
-                            break
-                        # item_day_status uses composite key
+                        # item_day_status uses composite key (rows have no `id`)
                         if self._table == "item_day_status":
                             if (
                                 existing.get("item_id") == record.get("item_id")
@@ -195,6 +191,12 @@ class FakeTable:
                                 existing.update(record)
                                 found = True
                                 break
+                            continue
+                        rid = record.get("id")
+                        if rid is not None and existing.get("id") == rid:
+                            existing.update(record)
+                            found = True
+                            break
                     if not found:
                         row = deepcopy(record)
                         if "id" not in row and self._table != "item_day_status":
@@ -235,6 +237,29 @@ class FakeStorage:
 
     def create_signed_url(self, path: str, expires_in: int = 3600):
         return {"signedURL": f"https://fake-storage/{path}?token=test"}
+
+    def create_signed_upload_url(self, path: str, options=None):
+        token = "fake-upload-token"
+        url = f"https://fake-upload.example/{path}?token={token}"
+        return {"signed_url": url, "signedUrl": url, "token": token, "path": path}
+
+    def exists(self, path: str) -> bool:
+        return path in self._files
+
+    def download(self, path: str, options=None, query_params=None) -> bytes:
+        return self._files.get(path, b"")
+
+    def list(self, path: str | None = None, options=None):
+        prefix = (path or "").rstrip("/")
+        names: list[str] = []
+        for key in self._files:
+            if prefix and key.startswith(prefix + "/"):
+                rest = key[len(prefix) + 1 :]
+                if "/" not in rest:
+                    names.append(rest)
+            elif not prefix and "/" in key:
+                continue
+        return [{"name": n} for n in sorted(names)]
 
 
 def make_fake_client(store: dict[str, list[dict]]) -> MagicMock:
@@ -278,11 +303,26 @@ def _make_fake_settings():
     s.smtp_password = ""
     s.smtp_from = ""
     s.smtp_use_tls = True
+    s.auth0_domain = ""
+    s.auth0_audience = ""
+    s.auth0_admin_roles = "admin"
+    s.auth0_admin_roles_claim = ""
+    s.auth0_admin_emails = ""
+    s.auth0_admin_subs = ""
+    s.sales_tax_rate_url = ""
+    s.sales_tax_fallback_percent = "4.225"
+    s.sales_tax_default_postal_code = "64089"
+    s.sales_tax_http_timeout_sec = 8.0
     return s
 
 
 @pytest.fixture()
-def client(fake_client):
+def fake_settings():
+    return _make_fake_settings()
+
+
+@pytest.fixture()
+def client(fake_client, fake_settings):
     """FastAPI TestClient with the Supabase dependency overridden."""
     from app.main import app
     from app.deps import get_supabase_client
@@ -291,8 +331,6 @@ def client(fake_client):
         yield fake_client
 
     app.dependency_overrides[get_supabase_client] = _override
-
-    fake_settings = _make_fake_settings()
 
     # Patch get_settings everywhere it's imported
     with (

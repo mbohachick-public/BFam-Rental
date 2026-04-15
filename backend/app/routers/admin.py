@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from supabase import Client
 
 from app.config import get_settings
-from app.deps import get_supabase_client, require_admin_stub
+from app.deps import get_supabase_client, require_admin
 from app.schemas import (
     AvailabilityBulkUpdate,
     BookingDeclineBody,
@@ -13,6 +13,8 @@ from app.schemas import (
     BookingRequestStatus,
     DayAvailability,
     DayStatus,
+    E2eCleanupBody,
+    E2eCleanupResult,
     ItemCreate,
     ItemDetail,
     ItemImageOut,
@@ -24,14 +26,16 @@ from app.services.booking_response import booking_out_from_row
 from app.services.booking_storage import admin_booking_file_response
 from app.services.dates import iter_days_inclusive
 from app.services.item_availability import day_availability_range
+from app.services.item_availability_seed import seed_day_status_for_new_item
 from app.services.item_images_storage import (
     MAX_ITEM_IMAGES,
     save_item_image_bytes,
     try_delete_item_image_for_url,
 )
+from app.services.e2e_cleanup import cleanup_e2e_test_items
 from app.services.quote_email import send_booking_declined_email
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_stub)])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 def _decimal(v: object):
@@ -108,6 +112,7 @@ def admin_create_item(body: ItemCreate, client: Client = Depends(get_supabase_cl
         client.table("item_images").insert(
             {"item_id": item_id, "url": url, "sort_order": idx}
         ).execute()
+    seed_day_status_for_new_item(client, item_id)
     return _load_item_detail(client, item_id)
 
 
@@ -396,3 +401,22 @@ def admin_get_item_availability(
     """Availability for any item, including inactive (public GET hides inactive items)."""
     _load_item_detail(client, item_id)
     return day_availability_range(client, item_id, date_from, date_to)
+
+
+@router.post("/maintenance/cleanup-e2e-test-data", response_model=E2eCleanupResult)
+def admin_cleanup_e2e_test_data(
+    body: E2eCleanupBody,
+    client: Client = Depends(get_supabase_client),
+) -> E2eCleanupResult:
+    """Remove items in e2e-test / e2e-admin categories and related storage (booking docs, images)."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set confirm=true to run cleanup",
+        )
+    settings = get_settings()
+    items_deleted, bookings_processed = cleanup_e2e_test_items(settings, client)
+    return E2eCleanupResult(
+        items_deleted=items_deleted,
+        bookings_processed_for_file_cleanup=bookings_processed,
+    )

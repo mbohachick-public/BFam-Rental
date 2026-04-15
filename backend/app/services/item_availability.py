@@ -5,6 +5,7 @@ from datetime import date
 from supabase import Client
 
 from app.schemas import DayAvailability, DayStatus
+from app.services.item_availability_seed import ensure_booking_window_day_status
 
 
 def day_availability_range(
@@ -13,6 +14,7 @@ def day_availability_range(
     date_from: date,
     date_to: date,
 ) -> list[DayAvailability]:
+    ensure_booking_window_day_status(client, item_id)
     res = (
         client.table("item_day_status")
         .select("day,status")

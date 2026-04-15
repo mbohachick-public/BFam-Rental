@@ -1,4 +1,4 @@
-import { test, expect, loginAsAdmin, futureDate, tinyJpeg } from './fixtures'
+import { test, expect, loginAsAdmin, futureDate, tinyJpeg, API_BASE } from './fixtures'
 
 test.describe('Admin bookings', () => {
   test.beforeEach(async ({ page }) => {
@@ -20,11 +20,13 @@ test.describe('Admin bookings', () => {
   })
 
   test('booking row shows status, dates, customer info', async ({ page, api }) => {
+    // Multipart POST requires API BOOKING_DOCUMENTS_STORAGE=local (default dev); production uses presign + complete.
     // Create a bookable item and submit a booking via API
     const item = await api.createItem({ towable: false })
     const itemId = item.id as string
     const start = futureDate(5)
     const end = futureDate(7)
+    const rowEmail = `row-e2e-${Date.now()}@test.com`
 
     await api.setDayStatuses(itemId, [
       { day: futureDate(5), status: 'open_for_booking' },
@@ -32,26 +34,12 @@ test.describe('Admin bookings', () => {
       { day: futureDate(7), status: 'open_for_booking' },
     ])
 
-    // Submit booking directly via API
-    const formData = new FormData()
-    formData.append('item_id', itemId)
-    formData.append('start_date', start)
-    formData.append('end_date', end)
-    formData.append('customer_email', 'e2e@test.com')
-    formData.append('customer_phone', '5551234567')
-    formData.append('customer_first_name', 'Test')
-    formData.append('customer_last_name', 'User')
-    formData.append('customer_address', '123 E2E Street')
-
-    const blob = new Blob([tinyJpeg()], { type: 'image/jpeg' })
-    formData.append('drivers_license', blob, 'license.jpg')
-
-    const bookRes = await page.request.post('http://localhost:8000/booking-requests', {
+    const bookRes = await page.request.post(`${API_BASE}/booking-requests`, {
       multipart: {
         item_id: itemId,
         start_date: start,
         end_date: end,
-        customer_email: 'e2e@test.com',
+        customer_email: rowEmail,
         customer_phone: '5551234567',
         customer_first_name: 'Test',
         customer_last_name: 'User',
@@ -63,12 +51,15 @@ test.describe('Admin bookings', () => {
         },
       },
     })
-    expect(bookRes.status()).toBe(201)
+    const bookErr = await bookRes.text()
+    expect(bookRes.status(), `Booking failed: ${bookErr}`).toBe(201)
 
     await page.goto('/admin/bookings')
-    const row = page.locator('.admin-booking-row', { hasText: 'e2e@test.com' })
-    await expect(row).toBeVisible()
+    const row = page.locator('.admin-booking-row', { hasText: rowEmail })
+    await expect(row).toBeVisible({ timeout: 15_000 })
     await expect(row.getByText(/pending/i)).toBeVisible()
+    await expect(row.getByText(start)).toBeVisible()
+    await expect(row.getByText(end)).toBeVisible()
   })
 
   test('accept a pending booking', async ({ page, api }) => {
@@ -77,17 +68,18 @@ test.describe('Admin bookings', () => {
     const itemId = item.id as string
     const start = futureDate(10)
     const end = futureDate(11)
+    const acceptEmail = `accept-e2e-${Date.now()}@test.com`
     await api.setDayStatuses(itemId, [
       { day: start, status: 'open_for_booking' },
       { day: end, status: 'open_for_booking' },
     ])
 
-    const bookRes = await page.request.post('http://localhost:8000/booking-requests', {
+    const bookRes = await page.request.post(`${API_BASE}/booking-requests`, {
       multipart: {
         item_id: itemId,
         start_date: start,
         end_date: end,
-        customer_email: 'accept-e2e@test.com',
+        customer_email: acceptEmail,
         customer_phone: '5559876543',
         customer_first_name: 'Accept',
         customer_last_name: 'Test',
@@ -99,15 +91,16 @@ test.describe('Admin bookings', () => {
         },
       },
     })
-    expect(bookRes.status()).toBe(201)
+    const bookErr = await bookRes.text()
+    expect(bookRes.status(), `Booking failed: ${bookErr}`).toBe(201)
 
     await page.goto('/admin/bookings')
-    const row = page.locator('.admin-booking-row', { hasText: 'accept-e2e@test.com' })
-    await expect(row).toBeVisible()
-    await row.getByRole('button', { name: /accept/i }).click()
+    const row = page.locator('.admin-booking-row', { hasText: acceptEmail })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.getByRole('button', { name: /^Accept$/ }).click()
 
     // After accepting, status should change
-    await expect(row.getByText(/accepted/i)).toBeVisible({ timeout: 10_000 })
+    await expect(row.getByText(/^accepted$/i)).toBeVisible({ timeout: 15_000 })
   })
 
   test('decline a pending booking with reason', async ({ page, api }) => {
@@ -120,12 +113,13 @@ test.describe('Admin bookings', () => {
       { day: end, status: 'open_for_booking' },
     ])
 
-    await page.request.post('http://localhost:8000/booking-requests', {
+    const declineEmail = `decline-e2e-${Date.now()}@test.com`
+    const bookRes = await page.request.post(`${API_BASE}/booking-requests`, {
       multipart: {
         item_id: itemId,
         start_date: start,
         end_date: end,
-        customer_email: 'decline-e2e@test.com',
+        customer_email: declineEmail,
         customer_phone: '5551112222',
         customer_first_name: 'Decline',
         customer_last_name: 'Test',
@@ -137,10 +131,12 @@ test.describe('Admin bookings', () => {
         },
       },
     })
+    const bookErr = await bookRes.text()
+    expect(bookRes.status(), `Booking failed: ${bookErr}`).toBe(201)
 
     await page.goto('/admin/bookings')
-    const row = page.locator('.admin-booking-row', { hasText: 'decline-e2e@test.com' })
-    await expect(row).toBeVisible()
+    const row = page.locator('.admin-booking-row', { hasText: declineEmail })
+    await expect(row).toBeVisible({ timeout: 15_000 })
     await row.getByRole('button', { name: /decline/i }).click()
 
     // Decline modal should appear

@@ -1,25 +1,14 @@
 from datetime import date
 from decimal import Decimal
 
-from app.services.booking import (
-    compute_rental_amounts,
-    duration_discount_percent,
-    validate_booking_dates,
-)
+from app.services.booking import compute_rental_amounts, validate_booking_dates
 
 
-def test_discount_per_day_caps_at_15() -> None:
-    assert duration_discount_percent(1) == Decimal("5")
-    assert duration_discount_percent(2) == Decimal("10")
-    assert duration_discount_percent(3) == Decimal("15")
-    assert duration_discount_percent(10) == Decimal("15")
-
-
-def test_compute_rental_amounts() -> None:
+def test_compute_rental_amounts_no_discount() -> None:
     base, pct, sub, dep = compute_rental_amounts(Decimal("100"), 2, Decimal("50"))
-    assert base == Decimal("200")
-    assert pct == Decimal("10")
-    assert sub == Decimal("180.00")
+    assert base == Decimal("200.00")
+    assert pct == Decimal("0")
+    assert sub == Decimal("200.00")
     assert dep == Decimal("50")
 
 

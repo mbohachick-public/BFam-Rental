@@ -27,6 +27,23 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_use_tls: bool = True
+    # Optional Auth0: when both are set, POST /booking-requests and /booking-requests/quote require a valid Bearer access token (audience = API identifier).
+    auth0_domain: str = ""
+    auth0_audience: str = ""
+    # Admin via Auth0: comma-separated role names matched against JWT permissions, roles, or AUTH0_ADMIN_ROLES_CLAIM (default role name: admin).
+    auth0_admin_roles: str = "admin"
+    # Optional exact JWT claim key (e.g. https://your.app/roles) whose value is a string or string array.
+    auth0_admin_roles_claim: str = ""
+    # Optional comma-separated emails; access token must include an email claim (add via Auth0 Action if missing).
+    auth0_admin_emails: str = ""
+    # Optional comma-separated Auth0 user ids (JWT "sub", e.g. auth0|abc123) — works when the access token has no roles/email claims.
+    auth0_admin_subs: str = ""
+    # Sales tax: live GET when SALES_TAX_RATE_URL is set (substitute {zip} or {ZIP}, or ?postal_code= is appended). No caching.
+    # Missouri DOR does not publish a simple public JSON rate API; use a proxy you host that reads official tables, or set fallback for dev.
+    sales_tax_rate_url: str = ""
+    sales_tax_fallback_percent: str = ""
+    sales_tax_default_postal_code: str = ""
+    sales_tax_http_timeout_sec: float = 8.0
 
     @field_validator("supabase_url")
     @classmethod

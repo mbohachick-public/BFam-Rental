@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { adminDelete, adminGet, adminPatch, adminPost, adminPostFormData } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
+import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type { ItemDetail, ItemImage } from '../../types'
 
 const MAX_IMAGES = 10
@@ -11,6 +12,7 @@ export function AdminItemFormPage() {
   const isNew = id === undefined
   const navigate = useNavigate()
   const { adminToken } = useAuth()
+  const adminApiReady = useAdminApiReady()
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -27,7 +29,7 @@ export function AdminItemFormPage() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (isNew || !id || !adminToken) return
+    if (isNew || !id || !adminApiReady) return
     let cancelled = false
     adminGet<ItemDetail>(`/admin/items/${id}`, adminToken)
       .then((it) => {
@@ -47,11 +49,11 @@ export function AdminItemFormPage() {
     return () => {
       cancelled = true
     }
-  }, [id, isNew, adminToken])
+  }, [id, isNew, adminApiReady, adminToken])
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    if (!adminToken) return
+    if (!adminApiReady) return
     setSaving(true)
     setError(null)
     const body = {
@@ -85,7 +87,7 @@ export function AdminItemFormPage() {
 
   async function onPickFiles(ev: React.ChangeEvent<HTMLInputElement>) {
     const files = ev.target.files
-    if (!files || !id || !adminToken) return
+    if (!files || !id || !adminApiReady) return
     const list = Array.from(files)
     ev.target.value = ''
     setError(null)
@@ -108,7 +110,7 @@ export function AdminItemFormPage() {
   }
 
   async function removeImage(im: ItemImage) {
-    if (!id || !adminToken) return
+    if (!id || !adminApiReady) return
     setError(null)
     try {
       const detail = await adminDelete<ItemDetail>(`/admin/items/${id}/images/${im.id}`, adminToken)

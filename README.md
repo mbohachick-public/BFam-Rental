@@ -32,7 +32,7 @@ Website for the trailer rental business.
 ## Production (Render)
 
 - **Hosting:** [Render](https://render.com) — API as a **Docker** web service, SPA as a **static** site. Definitions live in [`render.yaml`](render.yaml); full steps and env vars are in [Deployment: local/test vs production](Specs/Deployment-Environments.md).
-- **CI:** GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — backend tests and frontend production build on pushes and PRs to `main`.
+- **CI:** GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — backend tests and frontend production build on pushes and PRs to `main`. Branch protection on `main` requires the **`backend`** and **`frontend`** jobs (GitHub Actions app) to succeed before merge.
 
 ## Documentation
 

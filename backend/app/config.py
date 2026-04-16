@@ -1,12 +1,32 @@
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import urlparse
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# `app/config.py` → repository `backend/` (where `.env` with SUPABASE_* usually lives).
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_BACKEND_DOTENV = _BACKEND_DIR / ".env"
+
+
+def _dotenv_files() -> tuple[str, ...]:
+    """
+    Load env files so `uvicorn app.main:app` works when the shell cwd is `frontend/` or repo root:
+    cwd `.env` first, then `backend/.env` (later wins on duplicate keys).
+    """
+    paths: list[str] = [".env"]
+    if _BACKEND_DOTENV.is_file():
+        paths.append(str(_BACKEND_DOTENV))
+    return tuple(paths)
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_dotenv_files(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     supabase_url: str = ""
     supabase_service_role_key: str = ""

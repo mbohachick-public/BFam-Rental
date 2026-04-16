@@ -1,4 +1,4 @@
-import { test, expect, loginAsAdmin, futureDate, tinyJpeg } from './fixtures'
+import { test, expect, loginAsAdmin, futureDate, tinyJpeg, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 /*
  * Mobile viewport tests.
@@ -70,9 +70,10 @@ test.describe('Mobile viewports', () => {
   })
 
   test.describe('Mobile: Item detail', () => {
-    let itemId: string
+    let itemId = ''
 
     test.beforeAll(async ({ request }) => {
+      if (!E2E_ADMIN_AUTH_ENABLED) return
       const { createItem, uploadImage, setDayStatuses } = await (
         await import('./fixtures')
       ).adminApi(request)
@@ -85,6 +86,7 @@ test.describe('Mobile viewports', () => {
     })
 
     test('gallery image is full-width', async ({ page }) => {
+      test.skip(!itemId, 'Set E2E_AUTH0_ACCESS_TOKEN to seed item')
       await page.goto(`/items/${itemId}`)
       const img = page.locator('.item-hero-img')
       await expect(img).toBeVisible()
@@ -97,6 +99,7 @@ test.describe('Mobile viewports', () => {
     })
 
     test('booking form fields are usable', async ({ page }) => {
+      test.skip(!itemId, 'Set E2E_AUTH0_ACCESS_TOKEN to seed item')
       await page.goto(`/items/${itemId}`)
       const emailInput = page.getByLabel(/email/i).first()
       if (await emailInput.isVisible()) {
@@ -108,6 +111,10 @@ test.describe('Mobile viewports', () => {
   })
 
   test.describe('Mobile: Admin', () => {
+    test.beforeAll(({}, testInfo) => {
+      testInfo.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and backend Auth0 + admin rules)')
+    })
+
     test('admin items list is readable', async ({ page }) => {
       await loginAsAdmin(page)
       await expect(page.getByRole('heading', { name: /items/i })).toBeVisible()

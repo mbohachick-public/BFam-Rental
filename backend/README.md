@@ -39,12 +39,7 @@ Production on Render is defined in the root `render.yaml`; see `Specs/Deployment
 
 ## Admin routes
 
-`/admin/*` accepts either:
-
-1. **`X-Admin-Token: <ADMIN_STUB_TOKEN>`** (or query `admin_token=` for the same value), or  
-2. **`Authorization: Bearer <access_token>`** when **`AUTH0_DOMAIN`** and **`AUTH0_AUDIENCE`** are set, if the token is valid for that API **and** the user is allowed as admin (see below).
-
-The SPA can use the stub for local dev and e2e, or sign in with Auth0 and send the same API access token it uses for quote/booking.
+`/admin/*` requires **`AUTH0_DOMAIN`** and **`AUTH0_AUDIENCE`** on the API, plus **`Authorization: Bearer <access_token>`** where the token is valid for that API **and** the user is allowed as admin (see below). The SPA uses the same Auth0 access token it uses for quote/booking after the user chooses **Continue to admin**.
 
 **Who counts as admin (Auth0):** After JWT verification, the API allows access if **any** of these match:
 
@@ -78,7 +73,7 @@ A valid token that fails these checks receives **403** `Not authorized as admin`
 
 ## Auth0 (optional customer JWT)
 
-**Customers** use Auth0 for `POST /booking-requests/quote`, presign/complete or multipart booking create, and customer-account routes when **`AUTH0_DOMAIN`** + **`AUTH0_AUDIENCE`** are set. **Admins** can use the same access token on `/admin/*` when role/email rules match (see **Admin routes** above), or keep using **`X-Admin-Token`** for tests and automation.
+**Customers** use Auth0 for `POST /booking-requests/quote`, presign/complete or multipart booking create, and customer-account routes when **`AUTH0_DOMAIN`** + **`AUTH0_AUDIENCE`** are set. **Admins** use the same access token on `/admin/*` when role/email/sub rules match (see **Admin routes** above).
 
 **Booking document uploads:** With **`BOOKING_DOCUMENTS_STORAGE=supabase`** (default), the SPA calls **`POST /booking-requests/presign`** (JSON, including `drivers_license_content_type` and optional `license_plate_content_type`), uploads files with **`PUT`** to the returned signed URLs (bytes go to Supabase, not through this API), then **`POST /booking-requests/{booking_id}/complete`** with the same `path` values from the presign response. With **`BOOKING_DOCUMENTS_STORAGE=local`**, use **`POST /booking-requests`** multipart only. **`DELETE /booking-requests/{id}/abandon`** removes a pending presign row and any partial uploads under that prefix. If **`PUT`** to Supabase fails with a browser CORS error, add your site origin to Storage CORS in the Supabase dashboard.
 

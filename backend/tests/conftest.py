@@ -291,7 +291,6 @@ def _make_fake_settings():
     s.supabase_url = "https://test.supabase.co"
     s.supabase_service_role_key = "test-key"
     s.cors_origin_list = ["http://localhost:5173"]
-    s.admin_stub_token = "test-admin-token"
     s.booking_documents_storage = "local"
     s.booking_documents_local_dir = "/tmp/bfam-test-booking"
     s.item_images_storage = "local"
@@ -347,8 +346,20 @@ def client(fake_client, fake_settings):
 
 
 @pytest.fixture()
-def admin_headers() -> dict[str, str]:
-    return {"X-Admin-Token": "test-admin-token"}
+def admin_headers(fake_settings, monkeypatch) -> dict[str, str]:
+    """Bearer admin auth: enables Auth0 settings on the shared fake settings and stubs JWT verify."""
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
+    fake_settings.auth0_admin_roles = "admin"
+    fake_settings.auth0_admin_roles_claim = ""
+    fake_settings.auth0_admin_emails = ""
+    fake_settings.auth0_admin_subs = ""
+
+    def _verify(_token: str, *, domain: str, audience: str) -> dict:
+        return {"sub": "auth0|pytest-admin", "permissions": ["admin"]}
+
+    monkeypatch.setattr("app.deps.verify_auth0_access_token", _verify)
+    return {"Authorization": "Bearer pytest-admin-access-token"}
 
 
 # ---------------------------------------------------------------------------

@@ -1,40 +1,29 @@
-import { test, expect } from './fixtures'
-
-const ADMIN_TOKEN = process.env.ADMIN_STUB_TOKEN ?? 'dev-admin-change-me'
+import { test, expect, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 test.describe('Admin login', () => {
-  test('shows login form and rejects empty token', async ({ page }) => {
-    await page.goto('/admin/login')
-    await expect(page.getByRole('heading', { name: /admin/i })).toBeVisible()
-    await page.getByRole('button', { name: /continue with stub token/i }).click()
-    await expect(page.getByText(/enter the admin token/i)).toBeVisible()
+  test.beforeAll(() => {
+    test.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and VITE_E2E_AUTH0_ACCESS_TOKEN for the dev server)')
   })
 
-  test('successful login redirects to admin items', async ({ page }) => {
+  test('continue to admin redirects to admin items', async ({ page }) => {
     await page.goto('/admin/login')
-    await page.getByLabel(/admin token/i).fill(ADMIN_TOKEN)
-    await page.getByRole('button', { name: /continue with stub token/i }).click()
+    await page.getByRole('button', { name: /continue to admin/i }).click()
     await expect(page).toHaveURL(/\/admin\/items/)
     await expect(page.getByRole('heading', { name: /items/i })).toBeVisible()
   })
 
-  test('already-authenticated admin is redirected away from login', async ({ page }) => {
-    // First log in
+  test('returning to login redirects when admin session is active', async ({ page }) => {
     await page.goto('/admin/login')
-    await page.getByLabel(/admin token/i).fill(ADMIN_TOKEN)
-    await page.getByRole('button', { name: /continue with stub token/i }).click()
+    await page.getByRole('button', { name: /continue to admin/i }).click()
     await expect(page).toHaveURL(/\/admin\/items/)
 
-    // Navigate back to login
     await page.goto('/admin/login')
-    // Should redirect to admin items since already logged in
     await expect(page).toHaveURL(/\/admin\/items/)
   })
 
   test('/admin redirects to /admin/items', async ({ page }) => {
     await page.goto('/admin/login')
-    await page.getByLabel(/admin token/i).fill(ADMIN_TOKEN)
-    await page.getByRole('button', { name: /continue with stub token/i }).click()
+    await page.getByRole('button', { name: /continue to admin/i }).click()
     await expect(page).toHaveURL(/\/admin\/items/)
 
     await page.goto('/admin')

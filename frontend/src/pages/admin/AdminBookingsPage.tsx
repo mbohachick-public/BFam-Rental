@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { adminDownloadBlob, adminGet, adminPost, adminPostNoBody } from '../../api/client'
-import { useAuth } from '../../context/AuthContext'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type { BookingRequestOut } from '../../types'
 
-async function openBookingDocument(url: string, stubToken: string | null, label: string) {
+async function openBookingDocument(url: string, label: string) {
   try {
-    const blob = await adminDownloadBlob(url, stubToken)
+    const blob = await adminDownloadBlob(url)
     const obj = URL.createObjectURL(blob)
     const w = window.open(obj, '_blank', 'noopener,noreferrer')
     if (!w) URL.revokeObjectURL(obj)
@@ -25,7 +24,6 @@ function money(s: string | null | undefined) {
 }
 
 export function AdminBookingsPage() {
-  const { adminToken } = useAuth()
   const adminApiReady = useAdminApiReady()
   const [rows, setRows] = useState<BookingRequestOut[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -36,10 +34,10 @@ export function AdminBookingsPage() {
 
   const load = useCallback(() => {
     if (!adminApiReady) return
-    adminGet<BookingRequestOut[]>('/admin/booking-requests', adminToken)
+    adminGet<BookingRequestOut[]>('/admin/booking-requests')
       .then(setRows)
       .catch((e: Error) => setError(e.message))
-  }, [adminApiReady, adminToken])
+  }, [adminApiReady])
 
   useEffect(() => {
     load()
@@ -50,7 +48,7 @@ export function AdminBookingsPage() {
     setBusyId(id)
     setError(null)
     try {
-      await adminPostNoBody<BookingRequestOut>(`/admin/booking-requests/${id}/accept`, adminToken)
+      await adminPostNoBody<BookingRequestOut>(`/admin/booking-requests/${id}/accept`)
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Accept failed')
@@ -82,11 +80,9 @@ export function AdminBookingsPage() {
     setBusyId(declineForId)
     setError(null)
     try {
-      const out = await adminPost<BookingRequestOut>(
-        `/admin/booking-requests/${declineForId}/decline`,
-        adminToken,
-        { reason },
-      )
+      const out = await adminPost<BookingRequestOut>(`/admin/booking-requests/${declineForId}/decline`, {
+        reason,
+      })
       closeDecline()
       load()
       if (out.decline_email_sent === false) {
@@ -150,7 +146,7 @@ export function AdminBookingsPage() {
                   type="button"
                   className="doc-link"
                   onClick={() =>
-                    void openBookingDocument(r.drivers_license_url!, adminToken, "driver's license")
+                    void openBookingDocument(r.drivers_license_url!, "driver's license")
                   }
                 >
                   Driver’s license
@@ -165,7 +161,7 @@ export function AdminBookingsPage() {
                     type="button"
                     className="doc-link"
                     onClick={() =>
-                      void openBookingDocument(r.license_plate_url!, adminToken, 'license plate photo')
+                      void openBookingDocument(r.license_plate_url!, 'license plate photo')
                     }
                   >
                     License plate

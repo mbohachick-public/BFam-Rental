@@ -2,14 +2,22 @@ import { test as base, expect, type Page, type APIRequestContext } from '@playwr
 
 /** Match Playwright webServer / uvicorn default (127.0.0.1) — avoids localhost/IPv6 mismatches. */
 export const API_BASE = 'http://127.0.0.1:8000'
-const ADMIN_TOKEN = process.env.ADMIN_STUB_TOKEN ?? 'dev-admin-change-me'
+
+/** Set to a valid Auth0 access JWT for an API admin user (same audience as the API). */
+export const E2E_ADMIN_AUTH_ENABLED = Boolean(process.env.E2E_AUTH0_ACCESS_TOKEN?.trim())
 
 /* ------------------------------------------------------------------ */
 /*  Helpers – direct API calls for seeding / teardown                  */
 /* ------------------------------------------------------------------ */
 
 export async function adminApi(request: APIRequestContext) {
-  const headers = { 'X-Admin-Token': ADMIN_TOKEN }
+  const token = process.env.E2E_AUTH0_ACCESS_TOKEN?.trim()
+  if (!token) {
+    throw new Error(
+      'Set E2E_AUTH0_ACCESS_TOKEN to a valid Auth0 access token for an admin user (see playwright.config / frontend README).',
+    )
+  }
+  const headers = { Authorization: `Bearer ${token}` }
 
   async function createItem(overrides: Record<string, unknown> = {}) {
     const body = {
@@ -97,9 +105,13 @@ export async function adminApi(request: APIRequestContext) {
 /* ------------------------------------------------------------------ */
 
 export async function loginAsAdmin(page: Page) {
+  if (!E2E_ADMIN_AUTH_ENABLED) {
+    throw new Error(
+      'loginAsAdmin requires E2E_AUTH0_ACCESS_TOKEN and VITE_E2E_AUTH0_ACCESS_TOKEN (same JWT) for dev + Playwright.',
+    )
+  }
   await page.goto('/admin/login')
-  await page.getByLabel(/admin token/i).fill(ADMIN_TOKEN)
-  await page.getByRole('button', { name: /continue with stub token/i }).click()
+  await page.getByRole('button', { name: /continue to admin/i }).click()
   await page.waitForURL(/\/admin\/items/)
 }
 

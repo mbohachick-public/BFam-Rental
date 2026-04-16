@@ -18,8 +18,6 @@ services:
         sync: false
       - key: API_PUBLIC_URL
         sync: false
-      - key: ADMIN_STUB_TOKEN
-        sync: false
       - key: BOOKING_DOCUMENTS_STORAGE
         value: supabase
       - key: ITEM_IMAGES_STORAGE
@@ -34,8 +32,6 @@ services:
     staticPublishPath: ./frontend/dist
     envVars:
       - key: VITE_API_URL
-        sync: false
-      - key: VITE_ADMIN_STUB_TOKEN
         sync: false
       # Optional Auth0 (build-time): set VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID,
       # VITE_AUTH0_AUDIENCE in the dashboard if you use customer sign-in.

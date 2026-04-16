@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { adminGet, adminPut } from '../../api/client'
-import { useAuth } from '../../context/AuthContext'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import { firstOfMonth, iterDaysInMonth, lastOfMonth } from '../../lib/calendar'
 import type { DayAvailability, DayStatus, ItemDetail } from '../../types'
@@ -19,7 +18,6 @@ function label(s: DayStatus): string {
 
 export function AdminAvailabilityPage() {
   const { id } = useParams<{ id: string }>()
-  const { adminToken } = useAuth()
   const adminApiReady = useAdminApiReady()
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
@@ -35,15 +33,15 @@ export function AdminAvailabilityPage() {
 
   const loadItem = useCallback(() => {
     if (!id || !adminApiReady) return
-    adminGet<ItemDetail>(`/admin/items/${id}`, adminToken)
+    adminGet<ItemDetail>(`/admin/items/${id}`)
       .then(setItem)
       .catch(() => setItem(null))
-  }, [id, adminApiReady, adminToken])
+  }, [id, adminApiReady])
 
   const loadAvailability = useCallback(() => {
     if (!id || !adminApiReady) return
     const q = new URLSearchParams({ from, to }).toString()
-    adminGet<DayAvailability[]>(`/admin/items/${id}/availability?${q}`, adminToken)
+    adminGet<DayAvailability[]>(`/admin/items/${id}/availability?${q}`)
       .then((d) => {
         const next: Record<string, DayStatus> = {}
         for (const row of d) {
@@ -54,7 +52,7 @@ export function AdminAvailabilityPage() {
       .catch(() => {
         setEdits({})
       })
-  }, [id, from, to, adminApiReady, adminToken])
+  }, [id, from, to, adminApiReady])
 
   useEffect(() => {
     loadItem()
@@ -83,7 +81,7 @@ export function AdminAvailabilityPage() {
       status: statusForDay(d),
     }))
     try {
-      await adminPut(`/admin/items/${id}/availability`, adminToken, { days })
+      await adminPut(`/admin/items/${id}/availability`, { days })
       setSaved('Saved.')
       loadAvailability()
     } catch (e) {

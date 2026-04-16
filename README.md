@@ -17,7 +17,7 @@ Website for the trailer rental business.
    cd frontend && npm install && npm run dev
    ```
 
-   Open the URL Vite prints (usually http://localhost:5173). Use **Admin** → sign in with the same value as `ADMIN_STUB_TOKEN` in the API `.env`.
+   Open the URL Vite prints (usually http://localhost:5173). **Admin** requires Auth0 on both the SPA (`VITE_AUTH0_*`) and the API (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, plus admin allowlist env vars — see `backend/README.md`).
 
 ### “Failed to fetch” or catalog errors in the browser
 
@@ -31,6 +31,7 @@ Website for the trailer rental business.
 
 ## Production (Render)
 
+- **Domain:** **bohachickrentals.com** was purchased from [Porkbun](https://porkbun.com) on **April 15, 2026**. Wire DNS and Render custom hostnames when you point production at this domain (see [Deployment environments](Specs/Deployment-Environments.md)).
 - **Hosting:** [Render](https://render.com) — API as a **Docker** web service, SPA as a **static** site. Definitions live in [`render.yaml`](render.yaml); full steps and env vars are in [Deployment: local/test vs production](Specs/Deployment-Environments.md).
 - **CI:** GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — backend tests and frontend production build on pushes and PRs to `main`. Branch protection on `main` requires the **`backend`** and **`frontend`** jobs (GitHub Actions app) to succeed before merge.
 

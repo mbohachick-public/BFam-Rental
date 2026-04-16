@@ -71,19 +71,30 @@ def test_health_endpoint(client):
     assert res.json()["status"] == "ok"
 
 
-def test_admin_without_token_returns_401(client):
+def test_admin_without_auth0_env_returns_503(client):
+    res = client.get("/admin/items")
+    assert res.status_code == 503
+
+
+def test_admin_without_bearer_returns_401(client, fake_settings):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
     res = client.get("/admin/items")
     assert res.status_code == 401
 
 
-def test_admin_wrong_token_returns_401(client):
-    res = client.get("/admin/items", headers={"X-Admin-Token": "wrong"})
+def test_admin_x_admin_token_header_does_not_authorize(client, fake_settings):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
+    res = client.get("/admin/items", headers={"X-Admin-Token": "any-secret"})
     assert res.status_code == 401
 
 
-def test_admin_accepts_query_param_token(client):
-    res = client.get("/admin/items", params={"admin_token": "test-admin-token"})
-    assert res.status_code == 200
+def test_admin_query_param_token_does_not_authorize(client, fake_settings):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
+    res = client.get("/admin/items", params={"admin_token": "any-secret"})
+    assert res.status_code == 401
 
 
 def test_nonexistent_booking_accept_404(client, admin_headers):

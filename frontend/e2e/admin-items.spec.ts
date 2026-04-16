@@ -1,6 +1,10 @@
-import { test, expect, loginAsAdmin } from './fixtures'
+import { test, expect, loginAsAdmin, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 test.describe('Admin items list and CRUD', () => {
+  test.beforeAll(({}, testInfo) => {
+    testInfo.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and backend Auth0 + admin rules)')
+  })
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page)
   })

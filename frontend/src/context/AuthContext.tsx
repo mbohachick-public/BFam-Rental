@@ -2,12 +2,15 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
 
-const STORAGE_KEY = 'bfam_admin_token'
+/** Legacy stub token storage — removed; clear so old values are not mistaken for secrets. */
+const LEGACY_ADMIN_TOKEN_KEY = 'bfam_admin_token'
+
 /** Session flag: user chose “Continue to admin” after Auth0 sign-in (see Admin login). */
 const ADMIN_AUTH0_SESSION_KEY = 'bfam_admin_auth0_session'
 
@@ -20,9 +23,7 @@ function readAdminAuth0Session(): boolean {
 }
 
 type AuthContextValue = {
-  adminToken: string | null
-  setAdminToken: (token: string | null) => void
-  /** True after explicit “Continue to admin” while Auth0 session is used for /admin (no stub). */
+  /** True after explicit “Continue to admin” while the SPA uses Auth0 Bearer for /admin. */
   adminAuth0Session: boolean
   setAdminAuth0Session: (active: boolean) => void
   logout: () => void
@@ -30,23 +31,12 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function readStoredToken(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [adminToken, setTokenState] = useState<string | null>(() => readStoredToken())
   const [adminAuth0Session, setAdminAuth0SessionState] = useState(() => readAdminAuth0Session())
 
-  const setAdminToken = useCallback((token: string | null) => {
-    setTokenState(token)
+  useEffect(() => {
     try {
-      if (token) localStorage.setItem(STORAGE_KEY, token)
-      else localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(LEGACY_ADMIN_TOKEN_KEY)
     } catch {
       /* ignore */
     }
@@ -63,19 +53,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
-    setAdminToken(null)
     setAdminAuth0Session(false)
-  }, [setAdminToken, setAdminAuth0Session])
+  }, [setAdminAuth0Session])
 
   const value = useMemo(
     () => ({
-      adminToken,
-      setAdminToken,
       adminAuth0Session,
       setAdminAuth0Session,
       logout,
     }),
-    [adminToken, setAdminToken, adminAuth0Session, setAdminAuth0Session, logout],
+    [adminAuth0Session, setAdminAuth0Session, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

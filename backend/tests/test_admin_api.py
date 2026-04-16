@@ -3,6 +3,8 @@
 import io
 import uuid
 from datetime import date, timedelta
+
+import jwt as pyjwt
 from unittest.mock import patch
 
 from app.services.booking import booking_window_end
@@ -36,17 +38,25 @@ def test_admin_create_item(client, admin_headers, db_store):
     assert all(r["status"] == "open_for_booking" for r in seeded)
 
 
-def test_admin_create_item_missing_token(client):
+def test_admin_create_item_missing_token(client, fake_settings):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
     res = client.post("/admin/items", json={"title": "No Auth"})
     assert res.status_code == 401
 
 
-def test_admin_create_item_wrong_token(client):
-    res = client.post(
-        "/admin/items",
-        json={"title": "Wrong"},
-        headers={"X-Admin-Token": "bad-token"},
-    )
+def test_admin_create_item_wrong_token(client, fake_settings):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
+    with patch(
+        "app.deps.verify_auth0_access_token",
+        side_effect=pyjwt.PyJWTError(),
+    ):
+        res = client.post(
+            "/admin/items",
+            json={"title": "Wrong"},
+            headers={"Authorization": "Bearer not-a-valid-jwt"},
+        )
     assert res.status_code == 401
 
 
@@ -135,20 +145,6 @@ def test_admin_list_accepts_roles_as_objects_with_name(client, fake_settings):
         return_value={"sub": "auth0|1", "roles": [{"name": "Admin"}]},
     ):
         res = client.get("/admin/items", headers={"Authorization": "Bearer fake.jwt"})
-    assert res.status_code == 200
-
-
-def test_admin_stub_takes_precedence_over_bad_bearer(client, fake_settings, admin_headers):
-    fake_settings.auth0_domain = "tenant.auth0.com"
-    fake_settings.auth0_audience = "https://api.test/"
-    with patch(
-        "app.deps.verify_auth0_access_token",
-        side_effect=AssertionError("stub should win without calling verify"),
-    ):
-        res = client.get(
-            "/admin/items",
-            headers={**admin_headers, "Authorization": "Bearer should-not-be-used"},
-        )
     assert res.status_code == 200
 
 

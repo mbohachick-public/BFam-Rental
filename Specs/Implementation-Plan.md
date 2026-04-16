@@ -9,7 +9,7 @@ This document aligns user stories in `BFam Rental Stories.txt` with architecture
 | Database | **Supabase** (managed Postgres; optional Storage for item images) |
 | Frontend | **Vite + React** with **TypeScript** |
 | Backend | **Python** (**FastAPI**); **all reads and writes to the database go through Python** — the React app never holds Supabase DB credentials or calls PostgREST for data |
-| Authentication | **Auth0** for **customers** — **Free** tier for now; **Google** social + **email/password** (database connection); FastAPI validates JWTs. **Admin** still **stubbed** (`X-Admin-Token`) until upgraded |
+| Authentication | **Auth0** for **customers** and **admin** — **Free** tier for now; **Google** social + **email/password** (database connection); FastAPI validates JWTs on protected routes; admin uses the same API access token with role/email/sub allowlists |
 
 ## Python stack (recommended)
 
@@ -122,12 +122,12 @@ Tables or equivalent concepts (names illustrative):
 ## Delivery phases
 
 1. **Monorepo layout** — `frontend/` (Vite+React+TS), `backend/` (Python), shared env documentation; Supabase project and schema migration path.
-2. **Auth** — Admin: stub `X-Admin-Token`. Customers: optional Auth0 SPA + JWT on quote/booking when `AUTH0_*` / `VITE_AUTH0_*` are set; otherwise anonymous quote/booking still allowed for dev.
+2. **Auth** — Admin: Auth0 Bearer + `AUTH0_ADMIN_*` on the API; SPA **Continue to admin** after sign-in. Customers: optional Auth0 SPA + JWT on quote/booking when `AUTH0_*` / `VITE_AUTH0_*` are set; otherwise anonymous quote/booking still allowed for dev.
 3. **Read APIs** — items list, filters, item by id, availability range.
 4. **Customer UI** — catalog, detail, calendar display.
 5. **Booking** — POST booking request with server-side validation and rental total calculation.
 6. **Admin UI + APIs** — CRUD items, edit day status, accept bookings.
-7. **Polish** — responsive QA, errors, empty states; tighten Auth0 (production tenants) and replace admin stub when ready.
+7. **Polish** — responsive QA, errors, empty states; tighten Auth0 (production tenants).
 
 ## Related files
 

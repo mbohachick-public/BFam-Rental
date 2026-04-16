@@ -41,5 +41,3 @@ jobs:
       - run: npm ci
       - name: Build
         run: npm run build
-        env:
-          VITE_ADMIN_STUB_TOKEN: ci-placeholder

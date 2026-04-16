@@ -1,4 +1,4 @@
-import { test, expect, futureDate } from './fixtures'
+import { test, expect, futureDate, E2E_ADMIN_AUTH_ENABLED, adminApi } from './fixtures'
 
 test.describe('Catalog page', () => {
   test.beforeEach(async ({ page }) => {
@@ -54,7 +54,9 @@ test.describe('Catalog page', () => {
     await expect(page.getByText(/must be on or before/i)).toBeVisible()
   })
 
-  test('catalog cards link to item detail', async ({ page, api }) => {
+  test('catalog cards link to item detail', async ({ page, request }) => {
+    test.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN to seed catalog items via admin API')
+    const api = await adminApi(request)
     // Seed an item to guarantee at least one card
     const item = await api.createItem()
     const itemId = item.id as string

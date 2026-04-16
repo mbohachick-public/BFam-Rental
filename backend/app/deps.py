@@ -2,7 +2,7 @@ from collections.abc import Generator
 from typing import Annotated
 
 import jwt as pyjwt
-from fastapi import Depends, Header, HTTPException, Query, status
+from fastapi import Depends, Header, HTTPException, status
 from jwt.exceptions import PyJWKClientConnectionError
 from supabase import Client
 
@@ -98,61 +98,58 @@ def _auth0_claims_allow_admin(claims: dict, settings: Settings) -> bool:
 
 
 def require_admin(
-    x_admin_token: str | None = Header(None, alias="X-Admin-Token"),
-    admin_token: str | None = Query(None, description="Stub token for opening file links in a new tab"),
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
     """
-    Allow admin access if X-Admin-Token or admin_token query matches ADMIN_STUB_TOKEN,
-    or if Authorization Bearer is a valid Auth0 access token for this API and the user
-    is allowed by AUTH0_ADMIN_SUBS / AUTH0_ADMIN_EMAILS / AUTH0_ADMIN_ROLES / AUTH0_ADMIN_ROLES_CLAIM.
+    Admin routes require a valid Auth0 access token (Bearer) for this API plus
+    AUTH0_ADMIN_SUBS / AUTH0_ADMIN_EMAILS / AUTH0_ADMIN_ROLES / AUTH0_ADMIN_ROLES_CLAIM.
     """
     settings = get_settings()
-    stub = x_admin_token or admin_token
-    if stub and stub == settings.admin_stub_token:
-        return
-
     domain = (settings.auth0_domain or "").strip()
     audience = (settings.auth0_audience or "").strip()
-    if (
-        domain
-        and audience
-        and authorization
-        and authorization.lower().startswith("bearer ")
-    ):
-        raw = authorization[7:].strip()
-        if raw:
-            try:
-                claims = verify_auth0_access_token(raw, domain=domain, audience=audience)
-            except PyJWKClientConnectionError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=(
-                        "Cannot reach Auth0 to verify sign-in (JWKS). "
-                        "Allow outbound HTTPS from this API to your AUTH0_DOMAIN and check the domain value."
-                    ),
-                ) from e
-            except pyjwt.PyJWTError:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid or expired token",
-                ) from None
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Auth0 configuration error",
-                ) from None
-            allowed = _auth0_claims_allow_admin(claims, settings)
-            if allowed:
-                return
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized as admin",
-            )
+    if not domain or not audience:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin API requires AUTH0_DOMAIN and AUTH0_AUDIENCE.",
+        )
 
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in required",
+        )
+    raw = authorization[7:].strip()
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in required",
+        )
+    try:
+        claims = verify_auth0_access_token(raw, domain=domain, audience=audience)
+    except PyJWKClientConnectionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Cannot reach Auth0 to verify sign-in (JWKS). "
+                "Allow outbound HTTPS from this API to your AUTH0_DOMAIN and check the domain value."
+            ),
+        ) from e
+    except pyjwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        ) from None
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Auth0 configuration error",
+        ) from None
+    allowed = _auth0_claims_allow_admin(claims, settings)
+    if allowed:
+        return
     raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or missing admin token",
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not authorized as admin",
     )
 
 

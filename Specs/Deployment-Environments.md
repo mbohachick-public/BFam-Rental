@@ -70,7 +70,7 @@ You do **not** have to decide before shipping; pick one layout and set env vars 
 2. **Supabase:** Per-environment `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (server only).  
 3. **CORS:** Backend `CORS_ORIGINS` matches how users open the SPA.  
 4. **Storage / presign:** Supabase Storage CORS allows the SPA origin if browsers `PUT` directly to signed URLs.  
-5. **Admin stub:** Use a strong `ADMIN_STUB_TOKEN` in prod; restrict who knows it or rely on Auth0-only admin if you prefer.
+5. **Admin Auth0:** Set `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` on the API and admin allowlist vars (`AUTH0_ADMIN_*`); the SPA sends the same Bearer token as customers after **Continue to admin**.
 
 See `backend/.env.example` and `frontend/.env.example` for variable names.
 
@@ -86,7 +86,6 @@ See `backend/.env.example` and `frontend/.env.example` for variable names.
 | `SUPABASE_SERVICE_ROLE_KEY` | Server only; never in the frontend. |
 | `CORS_ORIGINS` | Comma-separated SPA origins (your static site URL + localhost for dev if needed). |
 | `API_PUBLIC_URL` | Public base URL of this API (e.g. `https://…onrender.com`). |
-| `ADMIN_STUB_TOKEN` | Strong secret for admin stub sign-in; match `VITE_ADMIN_STUB_TOKEN` on the static site. |
 | `BOOKING_DOCUMENTS_STORAGE` | Default `supabase` in `render.yaml`. |
 | `ITEM_IMAGES_STORAGE` | Default `supabase` in `render.yaml`. |
 
@@ -97,7 +96,6 @@ Optional (add in the dashboard when you use them): `AUTH0_DOMAIN`, `AUTH0_AUDIEN
 | Variable | Notes |
 |----------|--------|
 | `VITE_API_URL` | Full API origin, no trailing slash (required for split-host production). |
-| `VITE_ADMIN_STUB_TOKEN` | Same value as `ADMIN_STUB_TOKEN` on the API. |
-| `VITE_AUTH0_*` | Set if the SPA uses Auth0 (domain, client ID, audience). |
+| `VITE_AUTH0_*` | Set for customer + admin UI (domain, client ID, audience). |
 
 Supabase **Storage CORS** must allow your static site origin if browsers upload via signed URLs.

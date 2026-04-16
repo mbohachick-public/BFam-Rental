@@ -1,7 +1,7 @@
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { setCustomerAccessTokenGetter, type CustomerTokenOptions } from '../api/client'
-import { auth0Configured } from '../auth0/config'
+import { auth0Configured, e2eDevAuth0AccessToken } from '../auth0/config'
 import { CustomerSessionProvider, type CustomerSession } from '../context/CustomerSessionContext'
 
 function ClearCustomerTokenGetter() {
@@ -45,6 +45,28 @@ function Auth0AccessTokenBridge() {
   return null
 }
 
+/** Local e2e / automation: fixed Bearer without Auth0 SPA (token must be valid for the API). */
+function E2EDevAuth0Shell({ children, accessToken }: { children: ReactNode; accessToken: string }) {
+  const value = useMemo<CustomerSession>(
+    () => ({
+      mode: 'auth0',
+      isLoading: false,
+      isAuthenticated: true,
+      login: () => {},
+      logout: () => {},
+      userEmail: 'e2e@local.test',
+    }),
+    [],
+  )
+
+  useLayoutEffect(() => {
+    setCustomerAccessTokenGetter(async (_opts?: CustomerTokenOptions) => accessToken)
+    return () => setCustomerAccessTokenGetter(null)
+  }, [accessToken])
+
+  return <CustomerSessionProvider value={value}>{children}</CustomerSessionProvider>
+}
+
 function Auth0SessionShell({ children }: { children: ReactNode }) {
   const auth0 = useAuth0()
   const value = useMemo<CustomerSession>(
@@ -76,6 +98,11 @@ function Auth0SessionShell({ children }: { children: ReactNode }) {
 }
 
 export function Auth0Root({ children }: { children: ReactNode }) {
+  const e2eToken = e2eDevAuth0AccessToken()
+  if (e2eToken) {
+    return <E2EDevAuth0Shell accessToken={e2eToken}>{children}</E2EDevAuth0Shell>
+  }
+
   if (!auth0Configured()) {
     return (
       <CustomerSessionProvider value={{ mode: 'disabled' }}>

@@ -1,9 +1,10 @@
-import { test, expect, loginAsAdmin, tinyJpeg, tinyPng } from './fixtures'
+import { test, expect, loginAsAdmin, tinyJpeg, tinyPng, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 test.describe('Admin item image uploads', () => {
   let itemId: string
 
-  test.beforeAll(async ({ request }) => {
+  test.beforeAll(async ({ request }, testInfo) => {
+    testInfo.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and backend Auth0 + admin rules)')
     const { createItem } = await (await import('./fixtures')).adminApi(request)
     const item = await createItem({ title: 'Image Test E2E' })
     itemId = item.id as string

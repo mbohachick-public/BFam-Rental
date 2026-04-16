@@ -1,10 +1,11 @@
-import { test, expect, loginAsAdmin } from './fixtures'
+import { test, expect, loginAsAdmin, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 test.describe('Admin availability calendar', () => {
   let itemId: string
   let itemTitle: string
 
-  test.beforeAll(async ({ request }) => {
+  test.beforeAll(async ({ request }, testInfo) => {
+    testInfo.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and backend Auth0 + admin rules)')
     const { createItem } = await (await import('./fixtures')).adminApi(request)
     const item = await createItem({ title: 'Avail E2E' })
     itemId = item.id as string

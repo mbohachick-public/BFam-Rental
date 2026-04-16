@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { adminGet, adminPost } from '../../api/client'
-import { useAuth } from '../../context/AuthContext'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type { E2eCleanupResult, ItemSummary } from '../../types'
 
@@ -13,7 +12,6 @@ function money(s: string) {
 }
 
 export function AdminItemsPage() {
-  const { adminToken } = useAuth()
   const adminApiReady = useAdminApiReady()
   const [items, setItems] = useState<ItemSummary[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -22,10 +20,10 @@ export function AdminItemsPage() {
 
   const loadItems = useCallback(() => {
     if (!adminApiReady) return
-    adminGet<ItemSummary[]>('/admin/items', adminToken)
+    adminGet<ItemSummary[]>('/admin/items')
       .then(setItems)
       .catch((e: Error) => setError(e.message))
-  }, [adminApiReady, adminToken])
+  }, [adminApiReady])
 
   useEffect(() => {
     loadItems()
@@ -42,11 +40,9 @@ export function AdminItemsPage() {
     setCleanupMsg(null)
     setError(null)
     try {
-      const res = await adminPost<E2eCleanupResult>(
-        '/admin/maintenance/cleanup-e2e-test-data',
-        adminToken,
-        { confirm: true },
-      )
+      const res = await adminPost<E2eCleanupResult>('/admin/maintenance/cleanup-e2e-test-data', {
+        confirm: true,
+      })
       setCleanupMsg(
         `Removed ${res.items_deleted} item(s); cleaned files for ${res.bookings_processed_for_file_cleanup} booking(s).`,
       )

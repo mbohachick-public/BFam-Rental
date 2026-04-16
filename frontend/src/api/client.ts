@@ -87,26 +87,45 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   }
 }
 
-/** Headers for /admin/*: optional stub + optional Auth0 Bearer from customer bridge. */
+/** Headers for /admin/*: Auth0 Bearer from the registered token getter (required for admin routes). */
 export async function adminAuthHeaders(
-  stubToken: string | null,
   initHeaders?: HeadersInit,
+  tokenOpts?: CustomerTokenOptions,
 ): Promise<Record<string, string>> {
   const out: Record<string, string> =
     initHeaders instanceof Headers
       ? Object.fromEntries(initHeaders.entries())
       : { ...((initHeaders as Record<string, string> | undefined) ?? {}) }
-  const s = stubToken?.trim()
-  if (s) out['X-Admin-Token'] = s
   if (customerAccessTokenGetter) {
     try {
-      const t = await customerAccessTokenGetter()
+      const t = await customerAccessTokenGetter(tokenOpts)
       if (t) out.Authorization = `Bearer ${t}`
     } catch {
       /* ignore */
     }
   }
   return out
+}
+
+async function fetchAdminWithAuthRetry(path: string, init: RequestInit): Promise<Response> {
+  const baseHeaders: Record<string, string> =
+    init.headers instanceof Headers
+      ? Object.fromEntries(init.headers.entries())
+      : { ...((init.headers as Record<string, string> | undefined) ?? {}) }
+
+  const run = async (tokenOpts?: CustomerTokenOptions) => {
+    const headers = await adminAuthHeaders(baseHeaders, tokenOpts)
+    return apiFetch(`${baseUrl()}${path}`, { ...init, headers })
+  }
+
+  let res = await run(undefined)
+  if (res.status === 401 && customerAccessTokenGetter) {
+    const msg = await parseError(res.clone())
+    if (/invalid|expired|sign in required/i.test(msg)) {
+      res = await run({ cacheMode: 'off' })
+    }
+  }
+  return res
 }
 
 function resolveApiUrl(pathOrUrl: string): string {
@@ -119,8 +138,8 @@ function resolveApiUrl(pathOrUrl: string): string {
 }
 
 /** GET a binary (e.g. booking document) with admin auth; opens safely without putting tokens in the URL. */
-export async function adminDownloadBlob(url: string, stubToken: string | null): Promise<Blob> {
-  const headers = await adminAuthHeaders(stubToken)
+export async function adminDownloadBlob(url: string): Promise<Blob> {
+  const headers = await adminAuthHeaders()
   const res = await apiFetch(resolveApiUrl(url), { method: 'GET', headers })
   if (!res.ok) throw new Error(await parseError(res))
   return res.blob()
@@ -232,78 +251,56 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
-/** `stubToken` may be null when using Auth0 Bearer only. */
-export async function adminGet<T>(path: string, stubToken: string | null): Promise<T> {
-  const headers = await adminAuthHeaders(stubToken)
-  const res = await apiFetch(`${baseUrl()}${path}`, { headers })
+export async function adminGet<T>(path: string): Promise<T> {
+  const res = await fetchAdminWithAuthRetry(path, { method: 'GET' })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }
 
-export async function adminPost<T>(path: string, stubToken: string | null, body: unknown): Promise<T> {
-  const headers = await adminAuthHeaders(stubToken, { 'Content-Type': 'application/json' })
-  const res = await apiFetch(`${baseUrl()}${path}`, {
+export async function adminPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchAdminWithAuthRetry(path, {
     method: 'POST',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }
 
-export async function adminPatch<T>(path: string, stubToken: string | null, body: unknown): Promise<T> {
-  const headers = await adminAuthHeaders(stubToken, { 'Content-Type': 'application/json' })
-  const res = await apiFetch(`${baseUrl()}${path}`, {
+export async function adminPatch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchAdminWithAuthRetry(path, {
     method: 'PATCH',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }
 
-export async function adminPut(path: string, stubToken: string | null, body: unknown): Promise<void> {
-  const headers = await adminAuthHeaders(stubToken, { 'Content-Type': 'application/json' })
-  const res = await apiFetch(`${baseUrl()}${path}`, {
+export async function adminPut(path: string, body: unknown): Promise<void> {
+  const res = await fetchAdminWithAuthRetry(path, {
     method: 'PUT',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await parseError(res))
 }
 
-export async function adminPostNoBody<T>(path: string, stubToken: string | null): Promise<T> {
-  const headers = await adminAuthHeaders(stubToken)
-  const res = await apiFetch(`${baseUrl()}${path}`, {
-    method: 'POST',
-    headers,
-  })
+export async function adminPostNoBody<T>(path: string): Promise<T> {
+  const res = await fetchAdminWithAuthRetry(path, { method: 'POST' })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }
 
 /** multipart/form-data with admin auth (do not set Content-Type). */
-export async function adminPostFormData<T>(
-  path: string,
-  stubToken: string | null,
-  formData: FormData,
-): Promise<T> {
-  const headers = await adminAuthHeaders(stubToken)
-  const res = await apiFetch(`${baseUrl()}${path}`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  })
+export async function adminPostFormData<T>(path: string, formData: FormData): Promise<T> {
+  const res = await fetchAdminWithAuthRetry(path, { method: 'POST', body: formData })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }
 
-export async function adminDelete<T>(path: string, stubToken: string | null): Promise<T> {
-  const headers = await adminAuthHeaders(stubToken)
-  const res = await apiFetch(`${baseUrl()}${path}`, {
-    method: 'DELETE',
-    headers,
-  })
+export async function adminDelete<T>(path: string): Promise<T> {
+  const res = await fetchAdminWithAuthRetry(path, { method: 'DELETE' })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }

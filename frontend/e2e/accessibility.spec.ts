@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
-import { test, expect, loginAsAdmin, futureDate, tinyJpeg } from './fixtures'
+import { test, expect, loginAsAdmin, futureDate, tinyJpeg, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 /*
  * Accessibility / usability audits.
@@ -20,9 +20,10 @@ function formatViolations(violations: Array<{ id: string; impact?: string; descr
     .join('\n\n')
 }
 
-let testItemId: string
+let testItemId = ''
 
 test.beforeAll(async ({ request }) => {
+  if (!E2E_ADMIN_AUTH_ENABLED) return
   const { createItem, uploadImage, setDayStatuses } = await (
     await import('./fixtures')
   ).adminApi(request)
@@ -65,6 +66,7 @@ test.describe('Accessibility audits', () => {
   })
 
   test('Item detail page (/items/:id)', async ({ page }) => {
+    test.skip(!testItemId, 'Set E2E_AUTH0_ACCESS_TOKEN to seed item for this route')
     await page.goto(`/items/${testItemId}`)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     const results = await new AxeBuilder({ page })
@@ -94,6 +96,7 @@ test.describe('Accessibility audits', () => {
   })
 
   test('Admin items (/admin/items)', async ({ page }) => {
+    test.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN for admin UI')
     await loginAsAdmin(page)
     await page.goto('/admin/items')
     const results = await new AxeBuilder({ page })
@@ -109,6 +112,7 @@ test.describe('Accessibility audits', () => {
   })
 
   test('Admin item edit (/admin/items/:id/edit)', async ({ page }) => {
+    test.skip(!E2E_ADMIN_AUTH_ENABLED || !testItemId, 'Set E2E_AUTH0_ACCESS_TOKEN for admin UI')
     await loginAsAdmin(page)
     await page.goto(`/admin/items/${testItemId}/edit`)
     const results = await new AxeBuilder({ page })
@@ -124,6 +128,7 @@ test.describe('Accessibility audits', () => {
   })
 
   test('Admin availability (/admin/items/:id/availability)', async ({ page }) => {
+    test.skip(!E2E_ADMIN_AUTH_ENABLED || !testItemId, 'Set E2E_AUTH0_ACCESS_TOKEN for admin UI')
     await loginAsAdmin(page)
     await page.goto(`/admin/items/${testItemId}/availability`)
     const results = await new AxeBuilder({ page })
@@ -139,6 +144,7 @@ test.describe('Accessibility audits', () => {
   })
 
   test('Admin bookings (/admin/bookings)', async ({ page }) => {
+    test.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN for admin UI')
     await loginAsAdmin(page)
     await page.goto('/admin/bookings')
     const results = await new AxeBuilder({ page })

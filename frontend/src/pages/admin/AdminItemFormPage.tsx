@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { adminDelete, adminGet, adminPatch, adminPost, adminPostFormData } from '../../api/client'
-import { useAuth } from '../../context/AuthContext'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type { ItemDetail, ItemImage } from '../../types'
 
@@ -11,7 +10,6 @@ export function AdminItemFormPage() {
   const { id } = useParams<{ id: string }>()
   const isNew = id === undefined
   const navigate = useNavigate()
-  const { adminToken } = useAuth()
   const adminApiReady = useAdminApiReady()
 
   const [title, setTitle] = useState('')
@@ -31,7 +29,7 @@ export function AdminItemFormPage() {
   useEffect(() => {
     if (isNew || !id || !adminApiReady) return
     let cancelled = false
-    adminGet<ItemDetail>(`/admin/items/${id}`, adminToken)
+    adminGet<ItemDetail>(`/admin/items/${id}`)
       .then((it) => {
         if (cancelled) return
         setTitle(it.title)
@@ -49,7 +47,7 @@ export function AdminItemFormPage() {
     return () => {
       cancelled = true
     }
-  }, [id, isNew, adminApiReady, adminToken])
+  }, [id, isNew, adminApiReady])
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -69,13 +67,13 @@ export function AdminItemFormPage() {
     }
     try {
       if (isNew) {
-        const created = await adminPost<ItemDetail>('/admin/items', adminToken, {
+        const created = await adminPost<ItemDetail>('/admin/items', {
           ...body,
           image_urls: [],
         })
         navigate(`/admin/items/${created.id}/edit`, { replace: true })
       } else if (id) {
-        await adminPatch<ItemDetail>(`/admin/items/${id}`, adminToken, body)
+        await adminPatch<ItemDetail>(`/admin/items/${id}`, body)
         navigate('/admin/items')
       }
     } catch (err) {
@@ -98,7 +96,7 @@ export function AdminItemFormPage() {
         if (next.length >= MAX_IMAGES) break
         const fd = new FormData()
         fd.append('file', file)
-        const added = await adminPostFormData<ItemImage>(`/admin/items/${id}/images`, adminToken, fd)
+        const added = await adminPostFormData<ItemImage>(`/admin/items/${id}/images`, fd)
         next = [...next, added].sort((a, b) => a.sort_order - b.sort_order)
         setImages(next)
       }
@@ -113,7 +111,7 @@ export function AdminItemFormPage() {
     if (!id || !adminApiReady) return
     setError(null)
     try {
-      const detail = await adminDelete<ItemDetail>(`/admin/items/${id}/images/${im.id}`, adminToken)
+      const detail = await adminDelete<ItemDetail>(`/admin/items/${id}/images/${im.id}`)
       setImages([...detail.images].sort((a, b) => a.sort_order - b.sort_order))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Remove failed')

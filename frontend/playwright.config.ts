@@ -48,12 +48,18 @@ export default defineConfig({
       port: 8000,
       reuseExistingServer: true,
       timeout: 15_000,
+      env: { ...process.env },
     },
     {
       command: 'npm run dev',
       port: 5173,
       reuseExistingServer: true,
       timeout: 15_000,
+      env: {
+        ...process.env,
+        /* Same JWT as E2E_AUTH0_ACCESS_TOKEN — dev-only admin UI shim (see frontend/src/components/Auth0Root.tsx). */
+        VITE_E2E_AUTH0_ACCESS_TOKEN: process.env.E2E_AUTH0_ACCESS_TOKEN ?? '',
+      },
     },
   ],
 })

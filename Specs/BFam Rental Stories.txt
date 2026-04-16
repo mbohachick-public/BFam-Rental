@@ -35,6 +35,6 @@ As a user I should see first name, last name, and address fields when requesting
 Use supabase for the database
 Use Vite + React with TypeScript for the frontend
 Use python for server side services; all database activity runs through those services (no direct DB access from the browser)
-Use Auth0 for customer authentication: Auth0 Free tier is sufficient for initial scale (MAU within Free limits). Enable a database connection for email/username + password and a Google social connection; prioritize surfacing Google (and similar) sign-in in the UI while keeping password sign-in available. The React app integrates via Auth0 (e.g. SPA SDK or Universal Login); FastAPI validates JWTs (JWKS) on protected routes. Admin access remains stubbed (X-Admin-Token) until replaced with Auth0 roles or a dedicated admin auth approach.
+Use Auth0 for customer authentication: Auth0 Free tier is sufficient for initial scale (MAU within Free limits). Enable a database connection for email/username + password and a Google social connection; prioritize surfacing Google (and similar) sign-in in the UI while keeping password sign-in available. The React app integrates via Auth0 (e.g. SPA SDK or Universal Login); FastAPI validates JWTs (JWKS) on protected routes. Admin access uses the same Auth0 access token as customers, with API-side role/email/sub allowlists.
 
 See Implementation-Plan.md for architecture, API sketch, data model notes, and delivery phases.

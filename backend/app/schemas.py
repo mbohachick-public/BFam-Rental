@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -324,7 +324,7 @@ class BookingSignSubmit(BaseModel):
     acknowledgments: BookingSignAcknowledgments
 
     @model_validator(mode="after")
-    def _all_acks(self) -> BookingSignSubmit:
+    def _all_acks(self) -> Self:
         a = self.acknowledgments
         if not (
             a.rental_agreement

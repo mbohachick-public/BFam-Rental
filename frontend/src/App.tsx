@@ -12,6 +12,9 @@ import { AdminItemFormPage } from './pages/admin/AdminItemFormPage'
 import { AdminItemsPage } from './pages/admin/AdminItemsPage'
 import { AdminLayout } from './pages/admin/AdminLayout'
 import { AdminLoginPage } from './pages/admin/AdminLoginPage'
+import { BookingSignCompletePage } from './pages/BookingSignCompletePage'
+import { BookingSignPage } from './pages/BookingSignPage'
+import { PaymentSuccessPage } from './pages/PaymentSuccessPage'
 
 export default function App() {
   return (
@@ -24,6 +27,9 @@ export default function App() {
               <Route path="catalog" element={<CatalogPage />} />
               <Route path="items/:id" element={<ItemDetailPage />} />
               <Route path="my-rentals" element={<MyRentalsPage />} />
+              <Route path="booking-actions/:token/sign" element={<BookingSignPage />} />
+              <Route path="booking-actions/:token/complete" element={<BookingSignCompletePage />} />
+              <Route path="payment-success" element={<PaymentSuccessPage />} />
             </Route>
             <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/admin" element={<AdminLayout />}>

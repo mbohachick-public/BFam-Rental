@@ -29,6 +29,13 @@ frontend/test-results/
 data/booking-documents/
 backend/data/booking-documents/
 
+# Local executed contract PDFs (contract signing)
+data/contract-packets/
+backend/data/contract-packets/
+
+# Ephemeral vendor dir for CI/agent pytest (reportlab)
+backend/.pytest_vendor/
+
 # Local catalog item images (ITEM_IMAGES_STORAGE=local)
 data/item-images/
 backend/data/item-images/

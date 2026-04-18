@@ -61,12 +61,12 @@ test.describe('Admin bookings', () => {
     await page.goto('/admin/bookings')
     const row = page.locator('.admin-booking-row', { hasText: rowEmail })
     await expect(row).toBeVisible({ timeout: 15_000 })
-    await expect(row.getByText(/pending/i)).toBeVisible()
+    await expect(row.getByText(/requested/i)).toBeVisible()
     await expect(row.getByText(start)).toBeVisible()
     await expect(row.getByText(end)).toBeVisible()
   })
 
-  test('accept a pending booking', async ({ page, api }) => {
+  test('approve and confirm a requested booking', async ({ page, api }) => {
     // Seed item + booking
     const item = await api.createItem()
     const itemId = item.id as string
@@ -97,14 +97,60 @@ test.describe('Admin bookings', () => {
     })
     const bookErr = await bookRes.text()
     expect(bookRes.status(), `Booking failed: ${bookErr}`).toBe(201)
+    const booking = (await bookRes.json()) as { id: string }
+    const bookingId = booking.id
+
+    const approved = await api.approveBookingRequest(bookingId, 'card')
+    expect(approved.signing_url, 'approve should return signing_url').toBeTruthy()
+    await api.customerSignBooking(approved.signing_url!, acceptEmail, 'Accept Test')
 
     await page.goto('/admin/bookings')
     const row = page.locator('.admin-booking-row', { hasText: acceptEmail })
     await expect(row).toBeVisible({ timeout: 15_000 })
-    await row.getByRole('button', { name: /^Accept$/ }).click()
+    await expect(row.getByText(/approved_pending_payment/i)).toBeVisible({ timeout: 15_000 })
+    await row.getByRole('button', { name: /mark rental paid/i }).click()
+    await row.getByRole('button', { name: /mark deposit secured/i }).click()
+    await row.getByRole('button', { name: /confirm booking/i }).click()
+    await expect(row.getByText(/^confirmed$/i)).toBeVisible({ timeout: 15_000 })
+  })
 
-    // After accepting, status should change
-    await expect(row.getByText(/^accepted$/i)).toBeVisible({ timeout: 15_000 })
+  test('admin approve moves request to awaiting signature', async ({ page, api }) => {
+    const item = await api.createItem()
+    const itemId = item.id as string
+    const start = futureDate(20)
+    const end = futureDate(21)
+    const email = `await-sig-${Date.now()}@test.com`
+    await api.setDayStatuses(itemId, [
+      { day: start, status: 'open_for_booking' },
+      { day: end, status: 'open_for_booking' },
+    ])
+
+    const bookRes = await page.request.post(`${API_BASE}/booking-requests`, {
+      multipart: {
+        item_id: itemId,
+        start_date: start,
+        end_date: end,
+        customer_email: email,
+        customer_phone: '5550001111',
+        customer_first_name: 'Sig',
+        customer_last_name: 'Wait',
+        customer_address: '1 Wait St',
+        drivers_license: {
+          name: 'dl.jpg',
+          mimeType: 'image/jpeg',
+          buffer: tinyJpeg(),
+        },
+      },
+    })
+    expect(bookRes.ok()).toBeTruthy()
+
+    await page.goto('/admin/bookings')
+    const row = page.locator('.admin-booking-row', { hasText: email })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.getByRole('button', { name: /^Approve$/ }).click()
+    await expect(row.getByText(/approved_awaiting_signature/i)).toBeVisible({ timeout: 15_000 })
+    await expect(row.getByRole('button', { name: /resend signing email/i })).toBeVisible()
+    await expect(row.getByRole('button', { name: /copy signing link/i })).toBeEnabled()
   })
 
   test('decline a pending booking with reason', async ({ page, api }) => {
@@ -157,6 +203,6 @@ test.describe('Admin bookings', () => {
 
     // Modal should close and status should change
     await expect(modal).not.toBeVisible({ timeout: 10_000 })
-    await expect(row.getByText(/rejected/i)).toBeVisible({ timeout: 10_000 })
+    await expect(row.getByText(/declined/i)).toBeVisible({ timeout: 10_000 })
   })
 })

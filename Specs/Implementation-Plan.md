@@ -89,7 +89,7 @@ flowchart LR
 - **Catalog**: responsive grid; attribute-driven filters; optional search later.
 - **Item detail**: gallery, full attribute block, calendar with legend, date selection for booking, quote with rental total, **tax line**, and deposit, submit booking request; signed-in customers get contact prefill from the server (except license uploads).
 - **My rentals** (`/my-rentals`): signed-in customer list of their requests with link to item when applicable (only when Auth0 is enabled in the app).
-- **Admin**: item list and create/edit forms; booking request queue with accept and decline (reason + customer email); per-item (or item-scoped) calendar editor for status by date.
+- **Admin**: item list and create/edit forms; booking request queue with approve (then customer e-sign), resend signing link, payment-prep marks / confirm and decline (reason + customer email); per-item (or item-scoped) calendar editor for status by date.
 - **Auth stub**: Sign-in / account placeholders without real Auth0 until enabled.
 
 Mobile: single-column layouts, collapsible filters, calendar suited to small screens (e.g. scrollable month or week views).
@@ -108,7 +108,7 @@ Define concrete routes during implementation; initial shape:
 - `GET /booking-requests/mine` — **Requires** customer Auth0 (Bearer). Returns booking summaries for the JWT `sub` (no document URLs). **501** when Auth0 is not configured on the API.
 - `GET /booking-requests/me/contact` — **Requires** customer Auth0 (Bearer). Returns latest contact fields from the customer’s prior bookings for form prefill, or **404** if none. **501** when Auth0 is not configured.
 - Items include **`towable`** (boolean); admin sets it via item create/update.
-- Admin (stub-guarded): `POST/PATCH /admin/items`, `POST /admin/booking-requests/{id}/accept`, `POST /admin/booking-requests/{id}/decline` (JSON `reason`), `PUT /admin/items/{id}/availability` (or per-day PATCH).
+- Admin (stub-guarded): `POST/PATCH /admin/items`, `POST /admin/booking-requests/{id}/approve` (JSON `payment_path`), `POST .../mark-rental-paid`, `POST .../mark-deposit-secured`, `POST .../mark-agreement-signed`, `POST .../confirm`, `POST /admin/booking-requests/{id}/decline` (JSON `reason`), `PUT /admin/items/{id}/availability` (or per-day PATCH).
 
 ## Data model (high level)
 
@@ -117,7 +117,7 @@ Tables or equivalent concepts (names illustrative):
 - **items** — scalar attributes (title, description, category, cost_per_day, minimum_day_rental, deposit_amount, user_requirements, …).
 - **item_images** — ordered images per item (or JSON array if kept simple early).
 - **item_day_status** — `item_id`, `date`, `status` enum (four values).
-- **booking_requests** — item, date range, status (pending/accepted/rejected), optional **decline_reason**, pricing snapshot, **customer_email**, **customer_phone**, **customer_first_name**, **customer_last_name**, **customer_address**, optional **customer_auth0_sub** (JWT `sub` when Auth0 is enabled), document storage paths, notes.
+- **booking_requests** — item, date range, lifecycle **status** (see Phase 1 / `Specs/payments-handoff/`), optional **decline_reason**, pricing snapshot, contact fields, optional **customer_auth0_sub**, document paths, workflow fields (fulfillment, payment prefs, timestamps for approval/payment/deposit/agreement).
 
 ## Delivery phases
 
@@ -126,9 +126,19 @@ Tables or equivalent concepts (names illustrative):
 3. **Read APIs** — items list, filters, item by id, availability range.
 4. **Customer UI** — catalog, detail, calendar display.
 5. **Booking** — POST booking request with server-side validation and rental total calculation.
-6. **Admin UI + APIs** — CRUD items, edit day status, accept bookings.
+6. **Admin UI + APIs** — CRUD items, edit day status, approve and confirm bookings (see Phase 1 below).
 7. **Polish** — responsive QA, errors, empty states; tighten Auth0 (production tenants).
 
 ## Related files
 
 - User stories and tech spec bullets: `Specs/BFam Rental Stories.txt`
+
+## Phase 1 — Booking approval & payment prep (Codex handoff)
+
+Product copy, lifecycle rules, and acceptance criteria live under **`Specs/payments-handoff/`** (see that folder’s `README.md`). Database changes for extended `booking_request_status` values, `booking_requests` workflow columns, `booking_events`, and `items.delivery_available` are split across **`Specs/supabase-migration-booking-workflow-phase1-step1-enum.sql`** then **`Specs/supabase-migration-booking-workflow-phase1-step2-schema.sql`** (two runs in the Supabase SQL editor; see **`Specs/supabase-migration-booking-workflow-phase1.sql`** for why). Run after backup.
+
+**API (implemented in Python):** new bookings use status **`requested`** (legacy **`pending`** is still accepted on reads and for abandon/complete). Admin **`POST /admin/booking-requests/{id}/approve`** chooses **`payment_path`** (`card` / `ach` / `business_check`) and moves the row to **`approved_awaiting_signature`**: the API creates HTML snapshots + a signing token, emails the customer a link to **`{FRONTEND_PUBLIC_URL}/booking-actions/{token}/sign`**, and returns **`signing_url`** for the admin UI. The customer **`POST /booking-actions/{token}/sign`** (no auth) records acknowledgments, sets **`agreement_signed_at`**, advances to **`approved_pending_payment`** or **`approved_pending_check_clearance`**, and generates an executed PDF. **`GET /booking-actions/{token}/complete`** is the post-sign confirmation page. Admin **`POST /admin/booking-requests/{id}/resend-signature`** re-emails the link. Calendar days are marked **`booked`** only on **`POST .../confirm`**, after rental payment, deposit, and agreement are satisfied (agreement is normally satisfied by signing, not **`mark-agreement-signed`**). Optional env **`PAYMENT_COLLECTION_URL_TEMPLATE`** may include `{booking_id}` to populate **`payment_collection_url`** on approve. Declines use status **`declined`** (legacy **`rejected`** rows unchanged).
+
+## Contract signing (Codex bundle)
+
+Spec copy and field mapping: **`Specs/contract-signing/`** (see **`README.md`**). SQL: **`Specs/supabase-migration-contract-signing-step1-enum.sql`** then **`Specs/supabase-migration-contract-signing-step2-schema.sql`**. SPA routes: **`/booking-actions/:token/sign`** and **`/booking-actions/:token/complete`**.

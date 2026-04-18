@@ -145,7 +145,7 @@ export async function adminDownloadBlob(url: string): Promise<Blob> {
   return res.blob()
 }
 
-async function parseError(res: Response): Promise<string> {
+export async function parseError(res: Response): Promise<string> {
   try {
     const j: unknown = await res.json()
     if (j && typeof j === 'object' && 'detail' in j) {
@@ -165,6 +165,24 @@ export async function apiGet<T>(path: string): Promise<T> {
     : await apiFetch(`${baseUrl()}${path}`, {
         headers: await withCustomerAuthHeaders(path, {}),
       })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<T>
+}
+
+/** GET without customer/admin auth (e.g. tokenized signing links). */
+export async function apiGetPublic<T>(path: string): Promise<T> {
+  const res = await apiFetch(`${baseUrl()}${path}`, { method: 'GET' })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<T>
+}
+
+/** POST JSON without customer/admin auth. */
+export async function apiPostPublic<T>(path: string, body: unknown): Promise<T> {
+  const res = await apiFetch(`${baseUrl()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
 }

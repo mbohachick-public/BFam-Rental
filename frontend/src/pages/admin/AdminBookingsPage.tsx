@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { adminDownloadBlob, adminGet, adminPost, adminPostNoBody } from '../../api/client'
+import { adminDownloadBlob, adminGet, adminPost } from '../../api/client'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
-import type { BookingRequestOut } from '../../types'
+import type {
+  BookingRequestOut,
+  PaymentPath,
+  ResendSignatureOut,
+  StripeCheckoutSessionOut,
+  StripeCheckoutSyncOut,
+} from '../../types'
 
 async function openBookingDocument(url: string, label: string) {
   try {
@@ -23,6 +29,44 @@ function money(s: string | null | undefined) {
     : s
 }
 
+function isRequestedLike(status: string) {
+  return status === 'requested' || status === 'pending' || status === 'under_review'
+}
+
+function isPreConfirmApproved(status: string) {
+  return status === 'approved_pending_payment' || status === 'approved_pending_check_clearance'
+}
+
+function isAwaitingSignature(status: string) {
+  return status === 'approved_awaiting_signature'
+}
+
+function stripeCheckoutEligible(r: BookingRequestOut) {
+  return (
+    r.status === 'approved_pending_payment' &&
+    r.payment_path === 'card' &&
+    r.rental_total_with_tax != null &&
+    Number(r.rental_total_with_tax) > 0
+  )
+}
+
+function stripeDepositRefundEligible(r: BookingRequestOut) {
+  if (r.deposit_refunded_at || !r.deposit_secured_at) return false
+  const depPi = (r.stripe_deposit_payment_intent_id || '').trim()
+  if (depPi) return true
+  const cents = r.stripe_deposit_captured_cents
+  return (
+    typeof cents === 'number' &&
+    cents > 0 &&
+    Boolean(r.stripe_payment_intent_id)
+  )
+}
+
+function truncateId(s: string | null | undefined, max = 14) {
+  if (!s) return null
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
 export function AdminBookingsPage() {
   const adminApiReady = useAdminApiReady()
   const [rows, setRows] = useState<BookingRequestOut[]>([])
@@ -31,6 +75,9 @@ export function AdminBookingsPage() {
   const [declineForId, setDeclineForId] = useState<string | null>(null)
   const [declineReason, setDeclineReason] = useState('')
   const [declineError, setDeclineError] = useState<string | null>(null)
+  const [approvePathById, setApprovePathById] = useState<Record<string, PaymentPath>>({})
+  /** Latest signing URLs from approve/resend (list GET does not echo the token). */
+  const [signingUrlById, setSigningUrlById] = useState<Record<string, string>>({})
 
   const load = useCallback(() => {
     if (!adminApiReady) return
@@ -43,15 +90,163 @@ export function AdminBookingsPage() {
     load()
   }, [load])
 
-  async function accept(id: string) {
+  function approvePathFor(id: string): PaymentPath {
+    return approvePathById[id] ?? 'card'
+  }
+
+  async function approve(id: string) {
     if (!adminApiReady) return
     setBusyId(id)
     setError(null)
     try {
-      await adminPostNoBody<BookingRequestOut>(`/admin/booking-requests/${id}/accept`)
+      const out = await adminPost<BookingRequestOut>(`/admin/booking-requests/${id}/approve`, {
+        payment_path: approvePathFor(id),
+      })
+      if (out.signing_url) {
+        setSigningUrlById((prev) => ({ ...prev, [id]: out.signing_url! }))
+      }
       load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Accept failed')
+      setError(e instanceof Error ? e.message : 'Approve failed')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function markAction(id: string, action: string) {
+    if (!adminApiReady) return
+    setBusyId(id)
+    setError(null)
+    try {
+      await adminPost<BookingRequestOut>(`/admin/booking-requests/${id}/${action}`, {})
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `${action} failed`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function resendSignature(id: string) {
+    if (!adminApiReady) return
+    setBusyId(id)
+    setError(null)
+    try {
+      const out = await adminPost<ResendSignatureOut>(
+        `/admin/booking-requests/${id}/resend-signature`,
+        {},
+      )
+      setSigningUrlById((prev) => ({ ...prev, [id]: out.signing_url }))
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Resend failed')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function copySigningLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      window.prompt('Copy signing link:', url)
+    }
+  }
+
+  async function copyText(url: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      window.prompt(`Copy ${label}:`, url)
+    }
+  }
+
+  async function syncStripeCheckout(id: string) {
+    if (!adminApiReady) return
+    setBusyId(id)
+    setError(null)
+    try {
+      const out = await adminPost<StripeCheckoutSyncOut>(
+        `/admin/booking-requests/${id}/sync-stripe-checkout`,
+        {},
+      )
+      window.alert(
+        `Stripe sync finished:\n${out.actions.join('\n')}\n\nIf you still see unpaid here, ensure webhooks reach this API (e.g. stripe listen --forward-to localhost:8000/stripe/webhook).`,
+      )
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Stripe sync failed')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function generateStripeCheckout(id: string) {
+    if (!adminApiReady) return
+    setBusyId(id)
+    setError(null)
+    try {
+      const out = await adminPost<StripeCheckoutSessionOut>(
+        `/admin/booking-requests/${id}/stripe-checkout-session`,
+        {},
+      )
+      const es = out.stripe_checkout_email_status
+      if (es === 'skipped_payment_links_in_approval_email') {
+        // Payment links are sent in the approval / resend-signature email; no separate checkout email.
+      } else if (es && es !== 'sent') {
+        const hint =
+          es === 'skipped_no_smtp'
+            ? 'Configure SMTP on the API (SMTP_HOST, SMTP_FROM, etc. in backend .env). Until then, use Copy rental link / Copy deposit link and send them to the customer manually.'
+            : es === 'skipped_no_customer_email'
+              ? 'This booking has no customer email on file; add one or send the Stripe links manually.'
+              : es === 'skipped_no_payment_links'
+                ? 'No checkout URLs were produced for this run (e.g. already paid); nothing was emailed.'
+                : es.startsWith('failed_smtp')
+                  ? `SMTP send failed: ${es.slice('failed_smtp:'.length)}`
+                  : `Checkout email not sent (${es}).`
+        setError(`Stripe links were saved, but the customer email was not sent. ${hint}`)
+      }
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Stripe checkout failed')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function refundStripeDeposit(id: string) {
+    if (!adminApiReady) return
+    const row = rows.find((x) => x.id === id)
+    const separate =
+      typeof row?.stripe_deposit_payment_intent_id === 'string' &&
+      row.stripe_deposit_payment_intent_id.trim().length > 0
+    const msg = separate
+      ? 'Refund the full security deposit charge on Stripe? The rental payment is a separate charge and is not affected.'
+      : 'Issue a partial Stripe refund for the security deposit line on the combined rental payment? The rest of the rental charge stays captured.'
+    if (!window.confirm(msg)) {
+      return
+    }
+    setBusyId(id)
+    setError(null)
+    try {
+      await adminPost<BookingRequestOut>(`/admin/booking-requests/${id}/refund-stripe-deposit`, {})
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Deposit refund failed')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function confirm(id: string) {
+    if (!adminApiReady) return
+    setBusyId(id)
+    setError(null)
+    try {
+      await adminPost<BookingRequestOut>(`/admin/booking-requests/${id}/confirm`, {})
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Confirm failed')
     } finally {
       setBusyId(null)
     }
@@ -102,84 +297,331 @@ export function AdminBookingsPage() {
       <h1>Booking requests</h1>
       {error && <p className="error-msg">{error}</p>}
       <ul className="admin-table-list card">
-        {rows.map((r) => (
-          <li key={r.id} className="admin-table-row admin-booking-row">
-            <div>
-              <strong>{r.status}</strong>
-              <span className="muted">
-                {' '}
-                · {r.start_date} → {r.end_date}
-              </span>
-            </div>
-            <div className="muted small">
-              {[r.customer_first_name, r.customer_last_name].filter(Boolean).join(' ') || '—'}
-              {r.customer_phone ? ` · ${r.customer_phone}` : ''}
-              {r.customer_email ? ` · ${r.customer_email}` : ' · No email'}
-            </div>
-            {r.customer_address ? (
-              <div className="muted small">{r.customer_address}</div>
-            ) : null}
-            {r.notes ? <div className="muted small">{r.notes}</div> : null}
-            {r.status === 'rejected' && r.decline_reason ? (
-              <div className="small admin-decline-reason">
-                <strong>Decline reason:</strong> {r.decline_reason}
+        {rows.map((r) => {
+          const canDecline =
+            isRequestedLike(r.status) || isAwaitingSignature(r.status) || isPreConfirmApproved(r.status)
+          const canApprove = isRequestedLike(r.status)
+          const canMark = isPreConfirmApproved(r.status)
+          const signUrl = signingUrlById[r.id] ?? r.signing_url ?? null
+          const depositAmountNum = r.deposit_amount != null ? Number(r.deposit_amount) : 0
+          const needsDeposit = Number.isFinite(depositAmountNum) && depositAmountNum > 0
+          const rentalPaidOk =
+            Boolean(r.rental_paid_at) || String(r.rental_payment_status || '').toLowerCase() === 'paid'
+          const depositSecuredOk =
+            !needsDeposit ||
+            Boolean(r.deposit_secured_at) ||
+            Boolean((r.stripe_deposit_payment_intent_id || '').trim())
+          const readyToConfirm =
+            canMark && rentalPaidOk && depositSecuredOk && Boolean(r.agreement_signed_at)
+          return (
+            <li key={r.id} className="admin-table-row admin-booking-row">
+              <div>
+                <strong>{r.status}</strong>
+                <span className="muted">
+                  {' '}
+                  · {r.start_date} → {r.end_date}
+                </span>
               </div>
-            ) : null}
-            <div className="muted">
-              {r.sales_tax_amount != null && r.rental_total_with_tax != null ? (
-                <>
-                  Subtotal {money(r.discounted_subtotal)} · Tax {money(r.sales_tax_amount)}
-                  {r.sales_tax_rate_percent != null
-                    ? ` (${Number(r.sales_tax_rate_percent)}%)`
-                    : ''}{' '}
-                  · Total {money(r.rental_total_with_tax)} · Deposit {money(r.deposit_amount)}
-                </>
-              ) : (
-                <>
-                  Rental {money(r.discounted_subtotal)} · Deposit {money(r.deposit_amount)}
-                </>
-              )}
-            </div>
-            <div className="admin-booking-docs small">
-              {r.drivers_license_url ? (
-                <button
-                  type="button"
-                  className="doc-link"
-                  onClick={() =>
-                    void openBookingDocument(r.drivers_license_url!, "driver's license")
-                  }
-                >
-                  Driver’s license
-                </button>
-              ) : (
-                <span className="muted">No license on file</span>
-              )}
-              {r.license_plate_url ? (
-                <>
-                  {' · '}
+              <div className="muted small">
+                {[r.customer_first_name, r.customer_last_name].filter(Boolean).join(' ') || '—'}
+                {r.customer_phone ? ` · ${r.customer_phone}` : ''}
+                {r.customer_email ? ` · ${r.customer_email}` : ' · No email'}
+              </div>
+              {r.customer_address ? (
+                <div className="muted small">{r.customer_address}</div>
+              ) : null}
+              {r.notes ? <div className="muted small">{r.notes}</div> : null}
+              {(r.status === 'rejected' || r.status === 'declined') && r.decline_reason ? (
+                <div className="small admin-decline-reason">
+                  <strong>Decline reason:</strong> {r.decline_reason}
+                </div>
+              ) : null}
+              {isAwaitingSignature(r.status) ? (
+                <div className="muted small admin-awaiting-signature">
+                  Waiting for customer to sign the rental agreement. They were emailed a link; you can
+                  resend or copy the link here after approve or resend.
+                </div>
+              ) : null}
+              {r.payment_collection_url ? (
+                <div className="muted small">
+                  Payment link:{' '}
+                  <a href={r.payment_collection_url} target="_blank" rel="noreferrer">
+                    open
+                  </a>
+                </div>
+              ) : null}
+              <div className="muted">
+                {r.sales_tax_amount != null && r.rental_total_with_tax != null ? (
+                  <>
+                    Subtotal {money(r.discounted_subtotal)} · Tax {money(r.sales_tax_amount)}
+                    {r.sales_tax_rate_percent != null
+                      ? ` (${Number(r.sales_tax_rate_percent)}%)`
+                      : ''}{' '}
+                    · Total {money(r.rental_total_with_tax)} · Deposit {money(r.deposit_amount)}
+                  </>
+                ) : (
+                  <>
+                    Rental {money(r.discounted_subtotal)} · Deposit {money(r.deposit_amount)}
+                  </>
+                )}
+              </div>
+              {canMark ? (
+                <div className="muted small">
+                  Rental paid: {r.rental_paid_at ? 'yes' : 'no'}
+                  {r.rental_payment_status ? ` (${r.rental_payment_status})` : ''} · Deposit secured:{' '}
+                  {r.deposit_secured_at ? 'yes' : 'no'} · Agreement signed:{' '}
+                  {r.agreement_signed_at ? 'yes' : 'no'}
+                </div>
+              ) : null}
+              {stripeCheckoutEligible(r) ? (
+                <div className="muted small">
+                  Stripe rental checkout:{' '}
+                  {r.stripe_checkout_session_id
+                    ? `session ${truncateId(r.stripe_checkout_session_id)}`
+                    : 'not generated'}
+                  {r.stripe_checkout_created_at ? ` · ${r.stripe_checkout_created_at}` : ''}
+                </div>
+              ) : null}
+              {stripeCheckoutEligible(r) && r.stripe_checkout_url ? (
+                <div className="muted small">
+                  Rental total (pay link):{' '}
+                  <a href={r.stripe_checkout_url} target="_blank" rel="noreferrer">
+                    open
+                  </a>
+                </div>
+              ) : null}
+              {stripeCheckoutEligible(r) &&
+              r.deposit_amount != null &&
+              Number(r.deposit_amount) > 0 ? (
+                <div className="muted small">
+                  Stripe deposit checkout:{' '}
+                  {r.stripe_deposit_checkout_session_id
+                    ? `session ${truncateId(r.stripe_deposit_checkout_session_id)}`
+                    : 'not generated'}
+                  {r.stripe_deposit_checkout_created_at ? ` · ${r.stripe_deposit_checkout_created_at}` : ''}
+                </div>
+              ) : null}
+              {stripeCheckoutEligible(r) && r.stripe_deposit_checkout_url ? (
+                <div className="muted small">
+                  Security deposit (pay link):{' '}
+                  <a href={r.stripe_deposit_checkout_url} target="_blank" rel="noreferrer">
+                    open
+                  </a>
+                </div>
+              ) : null}
+              {typeof r.stripe_deposit_captured_cents === 'number' && r.stripe_deposit_captured_cents > 0 ? (
+                <div className="muted small">
+                  Stripe deposit captured: {(r.stripe_deposit_captured_cents / 100).toLocaleString(undefined, {
+                    style: 'currency',
+                    currency: 'USD',
+                  })}
+                  {r.deposit_refunded_at
+                    ? ` · Refunded ${r.deposit_refunded_at}${r.stripe_deposit_refund_id ? ` (${truncateId(r.stripe_deposit_refund_id, 18)})` : ''}`
+                    : ''}
+                </div>
+              ) : null}
+              <div className="admin-booking-docs small">
+                {r.drivers_license_url ? (
                   <button
                     type="button"
                     className="doc-link"
                     onClick={() =>
-                      void openBookingDocument(r.license_plate_url!, 'license plate photo')
+                      void openBookingDocument(r.drivers_license_url!, "driver's license")
                     }
                   >
-                    License plate
+                    Driver’s license
                   </button>
-                </>
-              ) : null}
-            </div>
-            <div className="admin-row-actions">
-              {r.status === 'pending' && (
-                <>
+                ) : (
+                  <span className="muted">No license on file</span>
+                )}
+                {r.license_plate_url ? (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      className="doc-link"
+                      onClick={() =>
+                        void openBookingDocument(r.license_plate_url!, 'license plate photo')
+                      }
+                    >
+                      License plate
+                    </button>
+                  </>
+                ) : null}
+              </div>
+              <div className="admin-row-actions admin-booking-actions">
+                {isAwaitingSignature(r.status) ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={busyId === r.id}
+                      onClick={() => void resendSignature(r.id)}
+                    >
+                      Resend signing email
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={!signUrl}
+                      title={signUrl ? undefined : 'Approve or resend to generate a signing link'}
+                      onClick={() => signUrl && void copySigningLink(signUrl)}
+                    >
+                      Copy signing link
+                    </button>
+                  </>
+                ) : null}
+                {canApprove ? (
+                  <>
+                    <label className="inline-select muted small">
+                      Payment path{' '}
+                      <select
+                        value={approvePathFor(r.id)}
+                        onChange={(e) =>
+                          setApprovePathById((prev) => ({
+                            ...prev,
+                            [r.id]: e.target.value as PaymentPath,
+                          }))
+                        }
+                        aria-label={`Payment path for booking ${r.id}`}
+                      >
+                        <option value="card">Card</option>
+                        <option value="ach">ACH</option>
+                        <option value="business_check">Business check</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={busyId === r.id}
+                      onClick={() => approve(r.id)}
+                    >
+                      {busyId === r.id ? '…' : 'Approve'}
+                    </button>
+                  </>
+                ) : null}
+                {canMark ? (
+                  <>
+                    {stripeCheckoutEligible(r) ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={busyId === r.id || (Boolean(r.rental_paid_at) && Boolean(r.deposit_secured_at))}
+                          title={
+                            r.rental_paid_at && r.deposit_secured_at
+                              ? 'Rental paid and deposit secured'
+                              : 'Recreates Stripe Checkout sessions when needed. Payment links are emailed with the signing link when the booking is approved or the signature email is resent — not from this button.'
+                          }
+                          onClick={() => void generateStripeCheckout(r.id)}
+                        >
+                          {r.stripe_checkout_url || r.stripe_deposit_checkout_url
+                            ? 'Regenerate Stripe links'
+                            : 'Generate payment links'}
+                        </button>
+                        {r.stripe_checkout_url ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={!r.stripe_checkout_url}
+                            onClick={() =>
+                              r.stripe_checkout_url && void copyText(r.stripe_checkout_url, 'Rental Stripe link')
+                            }
+                          >
+                            Copy rental link
+                          </button>
+                        ) : null}
+                        {r.stripe_deposit_checkout_url ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={!r.stripe_deposit_checkout_url}
+                            onClick={() =>
+                              r.stripe_deposit_checkout_url &&
+                              void copyText(r.stripe_deposit_checkout_url, 'Deposit Stripe link')
+                            }
+                          >
+                            Copy deposit link
+                          </button>
+                        ) : null}
+                        {r.stripe_checkout_session_id || r.stripe_deposit_checkout_session_id ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={busyId === r.id}
+                            title="Fetches Checkout sessions from Stripe and updates rental paid / deposit secured if Stripe shows paid (use when webhooks did not update this screen)."
+                            onClick={() => void syncStripeCheckout(r.id)}
+                          >
+                            Sync payment from Stripe
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={busyId === r.id || Boolean(r.rental_paid_at)}
+                      title="Manual reconciliation if Stripe webhook did not run"
+                      onClick={() => markAction(r.id, 'mark-rental-paid')}
+                    >
+                      Mark rental paid
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={
+                        busyId === r.id ||
+                        Boolean(r.deposit_secured_at) ||
+                        Boolean((r.stripe_deposit_payment_intent_id || '').trim())
+                      }
+                      title={
+                        (r.stripe_deposit_payment_intent_id || '').trim() && !r.deposit_secured_at
+                          ? 'Deposit PaymentIntent exists on the booking; refresh the list if the status looks stale.'
+                          : undefined
+                      }
+                      onClick={() => markAction(r.id, 'mark-deposit-secured')}
+                    >
+                      Mark deposit secured
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={busyId === r.id || Boolean(r.agreement_signed_at)}
+                      onClick={() => markAction(r.id, 'mark-agreement-signed')}
+                    >
+                      Mark agreement signed
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={busyId === r.id || !readyToConfirm}
+                      title={
+                        readyToConfirm
+                          ? 'Books calendar dates'
+                          : 'Requires rental paid, deposit secured (if deposit > 0), and agreement signed. If Stripe already shows paid, use Sync payment from Stripe first.'
+                      }
+                      onClick={() => confirm(r.id)}
+                    >
+                      Confirm booking
+                    </button>
+                  </>
+                ) : null}
+                {stripeDepositRefundEligible(r) ? (
                   <button
                     type="button"
-                    className="btn btn-primary btn-sm"
+                    className="btn btn-secondary btn-sm"
                     disabled={busyId === r.id}
-                    onClick={() => accept(r.id)}
+                    title={
+                      (r.stripe_deposit_payment_intent_id || '').trim()
+                        ? 'Full refund on the separate deposit charge'
+                        : 'Partial refund on the rental PaymentIntent for the deposit amount (legacy combined checkout)'
+                    }
+                    onClick={() => void refundStripeDeposit(r.id)}
                   >
-                    {busyId === r.id ? '…' : 'Accept'}
+                    Refund deposit (Stripe)
                   </button>
+                ) : null}
+                {canDecline ? (
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -188,11 +630,11 @@ export function AdminBookingsPage() {
                   >
                     Decline
                   </button>
-                </>
-              )}
-            </div>
-          </li>
-        ))}
+                ) : null}
+              </div>
+            </li>
+          )
+        })}
       </ul>
       {rows.length === 0 && !error && <p className="muted">No requests yet.</p>}
 

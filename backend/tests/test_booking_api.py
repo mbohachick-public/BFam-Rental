@@ -184,7 +184,7 @@ def test_create_booking_success(client, seed_item, seed_day_statuses):
     res = client.post("/booking-requests", data=data, files=files)
     assert res.status_code == 201
     body = res.json()
-    assert body["status"] == "pending"
+    assert body["status"] == "requested"
     assert body["customer_email"] == "book@test.com"
     assert body["sales_tax_rate_percent"] is not None
     assert float(body["sales_tax_amount"]) > 0
@@ -344,6 +344,7 @@ def test_presign_and_complete_non_towable(client, fake_client, fake_settings, se
         "customer_last_name": "Sign",
         "customer_address": "2 St",
         "drivers_license_content_type": "image/jpeg",
+        "request_not_confirmed_ack": True,
     }
     pre = client.post("/booking-requests/presign", json=body)
     assert pre.status_code == 201
@@ -357,7 +358,7 @@ def test_presign_and_complete_non_towable(client, fake_client, fake_settings, se
         json={"drivers_license_path": dl_path, "license_plate_path": None},
     )
     assert co.status_code == 200
-    assert co.json()["status"] == "pending"
+    assert co.json()["status"] == "requested"
     assert co.json()["customer_email"] == "pre@test.com"
 
 
@@ -379,6 +380,7 @@ def test_complete_fails_without_upload(client, fake_client, fake_settings, seed_
         "customer_last_name": "S",
         "customer_address": "3 St",
         "drivers_license_content_type": "image/jpeg",
+        "request_not_confirmed_ack": True,
     }
     pre = client.post("/booking-requests/presign", json=body)
     bid = pre.json()["booking_id"]
@@ -408,6 +410,7 @@ def test_abandon_after_presign(client, fake_settings, db_store, seed_item, seed_
         "customer_last_name": "B",
         "customer_address": "4 St",
         "drivers_license_content_type": "image/jpeg",
+        "request_not_confirmed_ack": True,
     }
     pre = client.post("/booking-requests/presign", json=body)
     bid = pre.json()["booking_id"]

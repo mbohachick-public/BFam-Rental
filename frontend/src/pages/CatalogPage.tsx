@@ -232,8 +232,17 @@ export function CatalogPage() {
                 <p className="catalog-meta muted">
                   {item.category}
                   {item.towable ? <span className="tag-towable">Towable</span> : null}
+                  {item.delivery_available === false ? (
+                    <span className="tag-pickup-only">Pickup only</span>
+                  ) : (
+                    <span className="tag-delivery">Delivery OK</span>
+                  )}
                 </p>
                 <p className="catalog-price">{money(item.cost_per_day)} / day</p>
+                <p className="catalog-deposit muted small">Deposit {money(item.deposit_amount)}</p>
+                <p className="catalog-cta" aria-hidden>
+                  Request booking →
+                </p>
               </div>
             </Link>
           </li>

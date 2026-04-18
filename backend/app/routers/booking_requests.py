@@ -11,6 +11,7 @@ from app.deps import customer_jwt_claims, get_supabase_client, require_customer_
 from app.schemas import (
     BookingCompleteBody,
     BookingContactForm,
+    BookingPaymentStatusPublic,
     BookingPresignRequest,
     BookingPresignResponse,
     BookingQuote,
@@ -122,6 +123,43 @@ def _dec_opt(v: object | None) -> Decimal | None:
     return Decimal(str(v))
 
 
+def _multipart_workflow_defaults() -> dict:
+    return {
+        "payment_method_preference": "card",
+        "is_repeat_contractor": False,
+        "request_not_confirmed_ack": True,
+    }
+
+
+def _workflow_from_presign(body: BookingPresignRequest) -> dict:
+    return {
+        "company_name": (body.company_name or "").strip() or None,
+        "payment_method_preference": body.payment_method_preference.value,
+        "is_repeat_contractor": body.is_repeat_contractor,
+        "tow_vehicle_year": body.tow_vehicle_year,
+        "tow_vehicle_make": (body.tow_vehicle_make or "").strip() or None,
+        "tow_vehicle_model": (body.tow_vehicle_model or "").strip() or None,
+        "tow_vehicle_tow_rating_lbs": body.tow_vehicle_tow_rating_lbs,
+        "has_brake_controller": body.has_brake_controller,
+        "request_not_confirmed_ack": body.request_not_confirmed_ack,
+    }
+
+
+def _validate_tow_vehicle_for_towable(body: BookingPresignRequest, *, towable: bool) -> None:
+    if not towable:
+        return
+    if body.tow_vehicle_year is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tow vehicle year is required for towable pickup rentals.",
+        )
+    if not (body.tow_vehicle_make or "").strip() or not (body.tow_vehicle_model or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tow vehicle make and model are required for towable pickup rentals.",
+        )
+
+
 def _validated_booking_insert_row(
     client: Client,
     settings,
@@ -197,7 +235,7 @@ def _validated_booking_insert_row(
         "item_id": item_id,
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
-        "status": BookingRequestStatus.pending.value,
+        "status": BookingRequestStatus.requested.value,
         "customer_email": str(contact.customer_email),
         "customer_phone": contact.customer_phone,
         "customer_first_name": contact.customer_first_name,
@@ -215,6 +253,8 @@ def _validated_booking_insert_row(
     }
     if auth_sub:
         insert_row["customer_auth0_sub"] = auth_sub
+
+    insert_row.update(_multipart_workflow_defaults())
 
     return (
         insert_row,
@@ -267,6 +307,22 @@ def list_my_booking_requests(
         it = items_map.get(iid) or {}
         title = str(it.get("title") or "Rental item")
         active = bool(it.get("active", True))
+        st = str(r.get("status") or "")
+        pay_url: str | None = None
+        stripe_url: str | None = None
+        stripe_deposit_url: str | None = None
+        if st in (
+            BookingRequestStatus.approved_pending_payment.value,
+            BookingRequestStatus.approved_pending_check_clearance.value,
+        ):
+            raw = r.get("payment_collection_url")
+            pay_url = str(raw).strip() if raw else None
+            if not r.get("rental_paid_at"):
+                su = r.get("stripe_checkout_url")
+                stripe_url = str(su).strip() if su else None
+            if not r.get("deposit_secured_at"):
+                du = r.get("stripe_deposit_checkout_url")
+                stripe_deposit_url = str(du).strip() if du else None
         out.append(
             CustomerBookingSummary(
                 id=str(r["id"]),
@@ -279,6 +335,9 @@ def list_my_booking_requests(
                 discounted_subtotal=_dec_opt(r.get("discounted_subtotal")),
                 rental_total_with_tax=_dec_opt(r.get("rental_total_with_tax")),
                 deposit_amount=_dec_opt(r.get("deposit_amount")),
+                payment_collection_url=pay_url,
+                stripe_checkout_url=stripe_url,
+                stripe_deposit_checkout_url=stripe_deposit_url,
             )
         )
     return out
@@ -322,6 +381,41 @@ def get_my_contact_profile(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No valid saved contact from previous bookings.",
         ) from None
+
+
+@router.get("/{booking_id}/payment-status", response_model=BookingPaymentStatusPublic)
+def public_booking_payment_status(booking_id: str, client: Client = Depends(get_supabase_client)):
+    """Post-Stripe thank-you page: minimal booking state (no auth; UUID is the secret)."""
+    res = (
+        client.table("booking_requests")
+        .select("id,status,rental_paid_at,rental_payment_status,item_id")
+        .eq("id", booking_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    row = rows[0]
+    item_res = (
+        client.table("items")
+        .select("title")
+        .eq("id", row["item_id"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    item_title = str(item_res[0].get("title") or "Rental") if item_res else "Rental"
+    paid = bool(row.get("rental_paid_at"))
+    rps = row.get("rental_payment_status")
+    return BookingPaymentStatusPublic(
+        booking_id=str(row["id"]),
+        status=str(row.get("status") or ""),
+        rental_paid=paid,
+        rental_payment_status=str(rps).strip() if rps is not None else None,
+        item_title=item_title,
+    )
 
 
 @router.post("/presign", response_model=BookingPresignResponse, status_code=status.HTTP_201_CREATED)
@@ -381,6 +475,8 @@ def presign_booking_uploads(
             body.notes,
         )
     )
+    insert_row.update(_workflow_from_presign(body))
+    _validate_tow_vehicle_for_towable(body, towable=towable)
     if towable and lp_type_norm is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -454,10 +550,11 @@ def complete_booking_uploads(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
-    if row.get("status") != BookingRequestStatus.pending.value:
+    st = row.get("status")
+    if st not in (BookingRequestStatus.pending.value, BookingRequestStatus.requested.value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only pending bookings can be completed.",
+            detail="Only draft booking uploads (requested / legacy pending) can be completed.",
         )
     if row.get("drivers_license_path") or row.get("license_plate_path"):
         raise HTTPException(
@@ -548,10 +645,11 @@ def abandon_booking_upload(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
-    if row.get("status") != BookingRequestStatus.pending.value:
+    st = row.get("status")
+    if st not in (BookingRequestStatus.pending.value, BookingRequestStatus.requested.value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only pending bookings can be abandoned.",
+            detail="Only draft booking uploads (requested / legacy pending) can be abandoned.",
         )
     if row.get("drivers_license_path") or row.get("license_plate_path"):
         raise HTTPException(

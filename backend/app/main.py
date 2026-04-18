@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.routers import admin, booking_requests, items
+from app.routers import admin, booking_actions, booking_requests, items, stripe_webhook
 
 app = FastAPI(title="BFam Rental API", version="0.1.0")
 
@@ -19,7 +19,9 @@ app.add_middleware(
 
 app.include_router(items.router)
 app.include_router(booking_requests.router)
+app.include_router(booking_actions.router)
 app.include_router(admin.router)
+app.include_router(stripe_webhook.router)
 
 
 @app.exception_handler(httpx.ConnectError)

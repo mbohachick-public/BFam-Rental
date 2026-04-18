@@ -73,7 +73,9 @@ export function MyRentalsPage() {
         <span>My rentals</span>
       </p>
       <h1>My rentals</h1>
-      <p className="muted">Booking requests tied to your account (pending, accepted, or declined).</p>
+      <p className="muted">
+        Booking requests tied to your account (requested, approved, confirmed, declined, etc.).
+      </p>
       {loading && <p className="muted">Loading…</p>}
       {error && <p className="error-msg">{error}</p>}
       {!loading && !error && rows.length === 0 && (
@@ -109,6 +111,20 @@ export function MyRentalsPage() {
                   <> · Deposit {money(r.deposit_amount)}</>
                 ) : null}
               </div>
+              {r.payment_collection_url ? (
+                <div className="small" style={{ marginTop: '0.35rem' }}>
+                  <a href={r.payment_collection_url} target="_blank" rel="noreferrer">
+                    Payment / next steps
+                  </a>
+                </div>
+              ) : null}
+              {r.stripe_checkout_url ? (
+                <div className="small" style={{ marginTop: '0.35rem' }}>
+                  <a href={r.stripe_checkout_url} target="_blank" rel="noreferrer">
+                    Pay rental balance (secure card checkout)
+                  </a>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>

@@ -88,6 +88,41 @@ export async function adminApi(request: APIRequestContext) {
     return res
   }
 
+  async function approveBookingRequest(bookingId: string, payment_path = 'card') {
+    const res = await request.post(`${API_BASE}/admin/booking-requests/${bookingId}/approve`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { payment_path },
+    })
+    const text = await res.text()
+    expect(res.ok(), `approve failed ${res.status()}: ${text}`).toBeTruthy()
+    return JSON.parse(text) as { signing_url?: string; status?: string }
+  }
+
+  /** Public signing endpoint (no auth). `signing_url` is from approve response. */
+  async function customerSignBooking(signingUrl: string, customerEmail: string, signerName: string) {
+    const m = signingUrl.match(/\/booking-actions\/([^/]+)\/sign/)
+    if (!m) throw new Error(`Bad signing_url: ${signingUrl}`)
+    const token = m[1]
+    const body = {
+      signer_name: signerName,
+      signer_email: customerEmail,
+      typed_signature: signerName,
+      acknowledgments: {
+        rental_agreement: true,
+        damage_fee_schedule: true,
+        responsibility_fees: true,
+        payment_deposit_gate: true,
+      },
+    }
+    const res = await request.post(`${API_BASE}/booking-actions/${token}/sign`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: JSON.stringify(body),
+    })
+    const text = await res.text()
+    expect(res.ok(), `sign failed ${res.status()}: ${text}`).toBeTruthy()
+    return JSON.parse(text) as Record<string, unknown>
+  }
+
   return {
     headers,
     createItem,
@@ -97,6 +132,8 @@ export async function adminApi(request: APIRequestContext) {
     listBookings,
     uploadImage,
     deleteImage,
+    approveBookingRequest,
+    customerSignBooking,
   }
 }
 

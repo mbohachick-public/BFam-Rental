@@ -312,6 +312,12 @@ def _make_fake_settings():
     s.sales_tax_fallback_percent = "4.225"
     s.sales_tax_default_postal_code = "64089"
     s.sales_tax_http_timeout_sec = 8.0
+    s.frontend_public_url = "http://localhost:5173"
+    s.app_base_url = ""
+    s.stripe_secret_key = ""
+    s.stripe_webhook_secret = ""
+    s.stripe_checkout_include_deposit = True
+    s.public_app_base_url = MagicMock(return_value="http://localhost:5173")
     return s
 
 
@@ -338,6 +344,7 @@ def client(fake_client, fake_settings):
         patch("app.routers.admin.get_settings", return_value=fake_settings),
         patch("app.routers.booking_requests.get_settings", return_value=fake_settings),
         patch("app.routers.items.get_settings", return_value=fake_settings),
+        patch("app.routers.stripe_webhook.get_settings", return_value=fake_settings),
     ):
         with TestClient(app) as tc:
             yield tc
@@ -388,6 +395,7 @@ def seed_item(db_store):
             "deposit_amount": deposit_amount,
             "user_requirements": "",
             "towable": towable,
+            "delivery_available": True,
             "active": active,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

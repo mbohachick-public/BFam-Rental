@@ -97,9 +97,9 @@ def test_admin_query_param_token_does_not_authorize(client, fake_settings):
     assert res.status_code == 401
 
 
-def test_nonexistent_booking_accept_404(client, admin_headers):
+def test_nonexistent_booking_confirm_404(client, admin_headers):
     res = client.post(
-        "/admin/booking-requests/00000000-0000-0000-0000-000000000000/accept",
+        "/admin/booking-requests/00000000-0000-0000-0000-000000000000/confirm",
         headers=admin_headers,
     )
     assert res.status_code == 404
@@ -114,7 +114,7 @@ def test_nonexistent_booking_decline_404(client, admin_headers):
     assert res.status_code == 404
 
 
-def test_accept_already_accepted_booking(client, admin_headers, seed_item, db_store):
+def test_confirm_wrong_status_returns_400(client, admin_headers, seed_item, db_store):
     import uuid as _uuid
     item = seed_item()
     bid = str(_uuid.uuid4())
@@ -125,7 +125,7 @@ def test_accept_already_accepted_booking(client, admin_headers, seed_item, db_st
         "item_id": item["id"],
         "start_date": start,
         "end_date": end,
-        "status": "accepted",
+        "status": "confirmed",
         "customer_email": "already@done.com",
         "customer_phone": "5550000000",
         "customer_first_name": "A",
@@ -143,13 +143,13 @@ def test_accept_already_accepted_booking(client, admin_headers, seed_item, db_st
     })
 
     res = client.post(
-        f"/admin/booking-requests/{bid}/accept",
+        f"/admin/booking-requests/{bid}/confirm",
         headers=admin_headers,
     )
     assert res.status_code == 400
 
 
-def test_decline_already_rejected_booking(client, admin_headers, seed_item, db_store):
+def test_decline_already_declined_booking(client, admin_headers, seed_item, db_store):
     import uuid as _uuid
     item = seed_item()
     bid = str(_uuid.uuid4())
@@ -160,7 +160,7 @@ def test_decline_already_rejected_booking(client, admin_headers, seed_item, db_s
         "item_id": item["id"],
         "start_date": start,
         "end_date": end,
-        "status": "rejected",
+        "status": "declined",
         "customer_email": "rejected@done.com",
         "customer_phone": "5550000000",
         "customer_first_name": "R",
@@ -196,7 +196,7 @@ def test_decline_empty_reason_rejected(client, admin_headers, seed_item, db_stor
         "item_id": item["id"],
         "start_date": start,
         "end_date": end,
-        "status": "pending",
+        "status": "requested",
         "customer_email": "empty@reason.com",
         "customer_phone": "5550000001",
         "customer_first_name": "E",

@@ -5,6 +5,7 @@ FastAPI service with all database access via Supabase (service role).
 ## Setup
 
 1. Create a Supabase project and run `Specs/supabase-setup.sql` in the SQL editor. The file header explains **PART 1** (new schema), **PART 2** (idempotent alters for legacy DBs — safe after PART 1), **PART 3** (Storage bucket names), and optional commented sections for demo seed, day-status backfill, and wipe. **Availability:** new items get `item_day_status` rows for the next **61** calendar days (`today` through `today + 60`, inclusive) as `open_for_booking` when created via `POST /admin/items`. The API also **fills missing days** in that window on catalog date filters, public/admin availability reads, and quote/booking. For **existing** items that predate that behavior, uncomment and run **PART 5** in the same file once to backfill.
+   - **Internal e-sign:** After Phase 1 booking workflow SQL, run **`Specs/supabase-migration-contract-signing-step1-enum.sql`** then **`Specs/supabase-migration-contract-signing-step2-schema.sql`** (two separate runs). Set **`FRONTEND_PUBLIC_URL`** to the customer-facing SPA origin (used in signing links in emails). Executed PDFs and snapshots are written under **`CONTRACT_PACKETS_DIR`** (default `data/contract-packets`; gitignored). **`reportlab`** is required (`pip install -e .`).
 2. **Booking document storage (default: Supabase Storage):** with `BOOKING_DOCUMENTS_STORAGE=supabase` (default), uploads go to the private bucket **`booking-documents`** (create it in Dashboard → Storage if needed). The API uses the service role key server-side. For local-only dev without Storage, set `BOOKING_DOCUMENTS_STORAGE=local` and files are saved under `BOOKING_DOCUMENTS_LOCAL_DIR` (default `data/booking-documents`; run uvicorn from `backend/`). Set **`API_PUBLIC_URL`** to your deployed API URL when the admin UI is not on the same host as the API.
 3. **Item catalog images (default: Supabase Storage):** with `ITEM_IMAGES_STORAGE=supabase` (default), admin uploads go to the **public** bucket **`item-images`** (see **PART 3** in `Specs/supabase-setup.sql`). The API stores public URLs in `item_images`. For local dev without Storage, set `ITEM_IMAGES_STORAGE=local` and files are saved under `ITEM_IMAGES_LOCAL_DIR` (default `data/item-images`); the API serves them at `/items/asset-images/{item_id}/{filename}` using **`API_PUBLIC_URL`** in stored links.
 4. Copy `.env.example` to `.env` and set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from Project Settings → API.
@@ -20,6 +21,8 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e .
 uvicorn app.main:app --reload --port 8000
 ```
+
+Keep the venv **activated** while `uvicorn` runs. If you start `uvicorn` from a shell that uses a different Python (for example a global install), you can get `ModuleNotFoundError` (e.g. for `stripe`) even though `pip install -e .` succeeded in `.venv`. Either activate `.venv` first or run `./.venv/bin/python -m uvicorn app.main:app --reload --port 8000`.
 
 Open http://127.0.0.1:8000/docs for OpenAPI.
 

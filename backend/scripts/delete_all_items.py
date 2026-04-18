@@ -5,7 +5,9 @@ Delete every row in public.items (and dependent rows via ON DELETE CASCADE).
 Also removes booking uploads and catalog images from Supabase Storage or local dirs
 (using the same helpers as the API), so you do not leave orphaned files.
 
-Usage (from repo root or backend — cwd is forced to backend/ for .env):
+Usage — from repo root: ``python3 backend/scripts/delete_all_items.py --yes`` —
+from ``backend/``: ``python3 scripts/delete_all_items.py --yes`` (do not prefix
+``backend/`` again if you are already inside ``backend/``).
 
   cd backend && python3 scripts/delete_all_items.py --yes
 

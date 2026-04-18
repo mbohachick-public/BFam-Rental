@@ -54,7 +54,7 @@ def test_mine_returns_summaries(client, fake_settings, customer_token_ok, seed_i
             "item_id": item["id"],
             "start_date": start,
             "end_date": end,
-            "status": "pending",
+            "status": "requested",
             "customer_email": "cust@test.com",
             "customer_phone": "5551234567",
             "customer_first_name": "A",
@@ -85,7 +85,7 @@ def test_mine_returns_summaries(client, fake_settings, customer_token_ok, seed_i
     assert row["item_id"] == item["id"]
     assert row["item_title"] == "Test Kayak"
     assert row["item_active"] is True
-    assert row["status"] == "pending"
+    assert row["status"] == "requested"
     assert "drivers_license" not in row
 
 
@@ -107,7 +107,7 @@ def test_contact_returns_latest(client, fake_settings, customer_token_ok, seed_i
                 "item_id": item["id"],
                 "start_date": (date.today() + timedelta(days=5)).isoformat(),
                 "end_date": (date.today() + timedelta(days=6)).isoformat(),
-                "status": "pending",
+                "status": "requested",
                 "customer_email": f"old{i}@test.com" if i == 0 else "newer@test.com",
                 "customer_phone": "1111111111" if i == 0 else "2222222222",
                 "customer_first_name": "Old" if i == 0 else "New",

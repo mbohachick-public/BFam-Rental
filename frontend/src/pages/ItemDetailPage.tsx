@@ -49,6 +49,15 @@ export function ItemDetailPage() {
   const [address, setAddress] = useState('')
   const [taxZip, setTaxZip] = useState('')
   const [notes, setNotes] = useState('')
+  const [companyName, setCompanyName] = useState('')
+  const [paymentPreference, setPaymentPreference] = useState<'card' | 'ach'>('card')
+  const [isRepeatContractor, setIsRepeatContractor] = useState(false)
+  const [towYear, setTowYear] = useState('')
+  const [towMake, setTowMake] = useState('')
+  const [towModel, setTowModel] = useState('')
+  const [towRating, setTowRating] = useState('')
+  const [hasBrakeController, setHasBrakeController] = useState(false)
+  const [requestAck, setRequestAck] = useState(false)
   const [quote, setQuote] = useState<BookingQuote | null>(null)
   const [quoteError, setQuoteError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -70,6 +79,15 @@ export function ItemDetailPage() {
     setAddress('')
     setTaxZip('')
     setActiveImageIdx(0)
+    setCompanyName('')
+    setPaymentPreference('card')
+    setIsRepeatContractor(false)
+    setTowYear('')
+    setTowMake('')
+    setTowModel('')
+    setTowRating('')
+    setHasBrakeController(false)
+    setRequestAck(false)
   }, [id])
 
   useEffect(() => {
@@ -79,7 +97,9 @@ export function ItemDetailPage() {
     setError(null)
     apiGet<ItemDetail>(`/items/${id}`)
       .then((data) => {
-        if (!cancelled) setItem(data)
+        if (!cancelled) {
+          setItem(data)
+        }
       })
       .catch((e: Error) => {
         if (!cancelled) setError(e.message)
@@ -192,6 +212,21 @@ export function ItemDetailPage() {
       setQuoteError('First name, last name, and address are required (correct auto-fill if needed).')
       return
     }
+    if (!requestAck) {
+      setQuoteError('Please confirm that this is a booking request, not a guaranteed reservation.')
+      return
+    }
+    if (item.towable) {
+      const y = parseInt(towYear, 10)
+      if (!towYear.trim() || !Number.isFinite(y)) {
+        setQuoteError('Tow vehicle year is required for towable pickup rentals.')
+        return
+      }
+      if (!towMake.trim() || !towModel.trim()) {
+        setQuoteError('Tow vehicle make and model are required for towable pickup rentals.')
+        return
+      }
+    }
     setSubmitting(true)
     setSubmitOk(null)
     setQuoteError(null)
@@ -216,7 +251,7 @@ export function ItemDetailPage() {
       const dlType = driversLicenseFile.type || 'image/jpeg'
       const lpType =
         item.towable && licensePlateFile ? licensePlateFile.type || 'image/jpeg' : undefined
-      const presignBody = {
+      const presignBody: Record<string, unknown> = {
         item_id: id,
         start_date: startDate,
         end_date: endDate,
@@ -228,6 +263,19 @@ export function ItemDetailPage() {
         notes: notes.trim() || undefined,
         drivers_license_content_type: dlType,
         license_plate_content_type: lpType,
+        request_not_confirmed_ack: true,
+        company_name: companyName.trim() || undefined,
+        payment_method_preference: paymentPreference,
+        is_repeat_contractor: isRepeatContractor,
+      }
+      if (item.towable) {
+        presignBody.tow_vehicle_year = parseInt(towYear, 10)
+        presignBody.tow_vehicle_make = towMake.trim()
+        presignBody.tow_vehicle_model = towModel.trim()
+        if (towRating.trim()) {
+          presignBody.tow_vehicle_tow_rating_lbs = parseInt(towRating, 10)
+        }
+        presignBody.has_brake_controller = hasBrakeController
       }
       try {
         const pre = await apiPost<BookingPresignResponse>('/booking-requests/presign', presignBody)
@@ -351,6 +399,14 @@ export function ItemDetailPage() {
               <dt>Towable</dt>
               <dd>{item.towable ? 'Yes — license plate photo required to book' : 'No'}</dd>
             </div>
+            <div>
+              <dt>Delivery</dt>
+              <dd>
+                {item.delivery_available === false
+                  ? 'Pickup only at our location'
+                  : 'Pickup or delivery may be available — note your preference below'}
+              </dd>
+            </div>
           </dl>
         </div>
       </div>
@@ -393,6 +449,11 @@ export function ItemDetailPage() {
           <strong>Email is required</strong> — we email your quote when you click Get quote, and a
           confirmation when you submit. License photo: JPEG, PNG, or WebP, max 10 MB.
           {item.towable ? ' Towable rentals also require a photo of your tow vehicle’s license plate.' : ''}
+        </p>
+        <p className="muted small">
+          Accepted payment methods include card, ACH, and business check (when approved). Submitting
+          this form is a <strong>request only</strong> — it does not guarantee availability until the
+          rental team approves dates, payment, deposit, and agreement.
         </p>
         <div className="booking-grid">
           <label className="field">
@@ -505,6 +566,85 @@ export function ItemDetailPage() {
             <span className="field-label">Notes (optional)</span>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
           </label>
+          <label className="field field-span">
+            <span className="field-label">Company / contractor name (optional)</span>
+            <input
+              type="text"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              autoComplete="organization"
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Payment preference</span>
+            <select
+              value={paymentPreference}
+              onChange={(e) => setPaymentPreference(e.target.value as 'card' | 'ach')}
+            >
+              <option value="card">Card</option>
+              <option value="ach">ACH</option>
+            </select>
+          </label>
+          <label className="field field-checkbox field-span">
+            <input
+              type="checkbox"
+              checked={isRepeatContractor}
+              onChange={(e) => setIsRepeatContractor(e.target.checked)}
+            />
+            <span>Repeat contractor / account with us</span>
+          </label>
+          {item.towable ? (
+            <>
+              <label className="field">
+                <span className="field-label">Tow vehicle year</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1950}
+                  max={2100}
+                  value={towYear}
+                  onChange={(e) => setTowYear(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Tow vehicle make</span>
+                <input type="text" value={towMake} onChange={(e) => setTowMake(e.target.value)} />
+              </label>
+              <label className="field">
+                <span className="field-label">Tow vehicle model</span>
+                <input type="text" value={towModel} onChange={(e) => setTowModel(e.target.value)} />
+              </label>
+              <label className="field">
+                <span className="field-label">Tow rating (lbs, optional)</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={towRating}
+                  onChange={(e) => setTowRating(e.target.value)}
+                />
+              </label>
+              <label className="field field-checkbox field-span">
+                <input
+                  type="checkbox"
+                  checked={hasBrakeController}
+                  onChange={(e) => setHasBrakeController(e.target.checked)}
+                />
+                <span>Brake controller installed on tow vehicle</span>
+              </label>
+            </>
+          ) : null}
+          <label className="field field-checkbox field-span">
+            <input
+              type="checkbox"
+              checked={requestAck}
+              onChange={(e) => setRequestAck(e.target.checked)}
+            />
+            <span>
+              I understand this is a <strong>request</strong>, not a confirmed reservation, until the
+              rental team approves it.
+            </span>
+          </label>
         </div>
         {quoteError && <p className="error-msg">{quoteError}</p>}
         {submitOk && <p className="success-msg">{submitOk}</p>}
@@ -525,7 +665,8 @@ export function ItemDetailPage() {
               phone.trim().length < 7 ||
               !firstName.trim() ||
               !lastName.trim() ||
-              !address.trim()
+              !address.trim() ||
+              !requestAck
             }
           >
             {submitting ? 'Sending…' : 'Submit request'}

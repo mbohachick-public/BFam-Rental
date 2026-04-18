@@ -20,6 +20,7 @@ export function AdminItemFormPage() {
   const [deposit, setDeposit] = useState('0')
   const [userReq, setUserReq] = useState('')
   const [towable, setTowable] = useState(false)
+  const [deliveryAvailable, setDeliveryAvailable] = useState(true)
   const [active, setActive] = useState(true)
   const [images, setImages] = useState<ItemImage[]>([])
   const [uploading, setUploading] = useState(false)
@@ -41,6 +42,7 @@ export function AdminItemFormPage() {
         setUserReq(it.user_requirements)
         setImages([...it.images].sort((a, b) => a.sort_order - b.sort_order))
         setTowable(Boolean(it.towable))
+        setDeliveryAvailable(it.delivery_available !== false)
         setActive(it.active !== false)
       })
       .catch((e: Error) => setError(e.message))
@@ -63,6 +65,7 @@ export function AdminItemFormPage() {
       deposit_amount: deposit,
       user_requirements: userReq.trim(),
       towable,
+      delivery_available: deliveryAvailable,
       active,
     }
     try {
@@ -185,6 +188,14 @@ export function AdminItemFormPage() {
             onChange={(e) => setTowable(e.target.checked)}
           />
           <span>Towable (customers must upload a license plate photo when booking)</span>
+        </label>
+        <label className="field field-checkbox">
+          <input
+            type="checkbox"
+            checked={deliveryAvailable}
+            onChange={(e) => setDeliveryAvailable(e.target.checked)}
+          />
+          <span>Delivery available (shown on catalog; pickup remains available)</span>
         </label>
         <label className="field field-checkbox">
           <input

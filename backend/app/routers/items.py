@@ -45,7 +45,7 @@ def list_items(
         )
 
     q = client.table("items").select(
-        "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,active"
+        "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,delivery_available,active"
     ).eq("active", True)
     if category and category.strip():
         q = q.eq("category", category.strip())
@@ -98,6 +98,7 @@ def list_items(
                 minimum_day_rental=int(row["minimum_day_rental"]),
                 deposit_amount=_decimal(row["deposit_amount"]),
                 towable=bool(row.get("towable", False)),
+                delivery_available=bool(row.get("delivery_available", True)),
                 image_urls=urls,
                 active=bool(row.get("active", True)),
             )
@@ -130,7 +131,7 @@ def get_item(item_id: str, client: Client = Depends(get_supabase_client)) -> Ite
     res = (
         client.table("items")
         .select(
-            "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,active"
+            "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,delivery_available,active"
         )
         .eq("id", item_id)
         .limit(1)
@@ -162,6 +163,7 @@ def get_item(item_id: str, client: Client = Depends(get_supabase_client)) -> Ite
         minimum_day_rental=int(row["minimum_day_rental"]),
         deposit_amount=_decimal(row["deposit_amount"]),
         towable=bool(row.get("towable", False)),
+        delivery_available=bool(row.get("delivery_available", True)),
         image_urls=urls,
         description=row["description"],
         user_requirements=row["user_requirements"],

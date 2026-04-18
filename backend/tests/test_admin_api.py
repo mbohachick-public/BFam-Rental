@@ -274,7 +274,13 @@ def test_admin_delete_image(client, admin_headers, seed_item, db_store):
     assert res.status_code == 200
 
 
-def test_admin_accept_booking(client, admin_headers, seed_item, seed_day_statuses, db_store):
+def test_admin_approve_mark_and_confirm_booking(
+    client, admin_headers, seed_item, seed_day_statuses, db_store, tmp_path, monkeypatch
+):
+    from app.config import get_settings
+
+    monkeypatch.setenv("CONTRACT_PACKETS_DIR", str(tmp_path))
+    get_settings.cache_clear()
     item = seed_item()
     start = (date.today() + timedelta(days=5)).isoformat()
     end = (date.today() + timedelta(days=6)).isoformat()
@@ -284,13 +290,14 @@ def test_admin_accept_booking(client, admin_headers, seed_item, seed_day_statuse
     ])
 
     import uuid as _uuid
+
     bid = str(_uuid.uuid4())
     db_store["booking_requests"].append({
         "id": bid,
         "item_id": item["id"],
         "start_date": start,
         "end_date": end,
-        "status": "pending",
+        "status": "requested",
         "customer_email": "test@e2e.com",
         "customer_phone": "5551234567",
         "customer_first_name": "Test",
@@ -301,18 +308,71 @@ def test_admin_accept_booking(client, admin_headers, seed_item, seed_day_statuse
         "discount_percent": 10.0,
         "discounted_subtotal": 90.0,
         "deposit_amount": 100.0,
+        "sales_tax_rate_percent": 4.225,
+        "sales_tax_amount": 3.8,
+        "rental_total_with_tax": 93.8,
+        "sales_tax_source": "TEST",
         "drivers_license_path": None,
         "license_plate_path": None,
         "decline_reason": None,
         "created_at": "2026-04-01T00:00:00",
     })
 
-    res = client.post(
-        f"/admin/booking-requests/{bid}/accept",
+    ap = client.post(
+        f"/admin/booking-requests/{bid}/approve",
         headers=admin_headers,
+        json={"payment_path": "card"},
     )
-    assert res.status_code == 200
-    assert res.json()["status"] == "accepted"
+    assert ap.status_code == 200
+    body = ap.json()
+    assert body["status"] == "approved_awaiting_signature"
+    assert body.get("signing_url")
+    sign_url = str(body["signing_url"])
+    token = sign_url.split("/booking-actions/")[1].split("/sign")[0]
+
+    g = client.get(f"/booking-actions/{token}/sign")
+    assert g.status_code == 200
+    assert "agreement_html" in g.json()
+
+    sign_body = {
+        "signer_name": "Test User",
+        "signer_email": "test@e2e.com",
+        "typed_signature": "Test User",
+        "acknowledgments": {
+            "rental_agreement": True,
+            "damage_fee_schedule": True,
+            "responsibility_fees": True,
+            "payment_deposit_gate": True,
+        },
+    }
+    ps = client.post(f"/booking-actions/{token}/sign", json=sign_body)
+    assert ps.status_code == 200
+    assert ps.json()["next_status"] == "approved_pending_payment"
+
+    assert (
+        client.post(
+            f"/admin/booking-requests/{bid}/mark-rental-paid",
+            headers=admin_headers,
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/admin/booking-requests/{bid}/mark-deposit-secured",
+            headers=admin_headers,
+        ).status_code
+        == 200
+    )
+    cf = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
+    assert cf.status_code == 200
+    assert cf.json()["status"] == "confirmed"
+    booked = [
+        r
+        for r in db_store["item_day_status"]
+        if r["item_id"] == item["id"] and r["status"] == "booked"
+    ]
+    assert len(booked) >= 2
+    get_settings.cache_clear()
 
 
 def test_admin_decline_booking(client, admin_headers, seed_item, seed_day_statuses, db_store):
@@ -331,7 +391,7 @@ def test_admin_decline_booking(client, admin_headers, seed_item, seed_day_status
         "item_id": item["id"],
         "start_date": start,
         "end_date": end,
-        "status": "pending",
+        "status": "requested",
         "customer_email": "decline@e2e.com",
         "customer_phone": "5559876543",
         "customer_first_name": "Dec",
@@ -355,7 +415,7 @@ def test_admin_decline_booking(client, admin_headers, seed_item, seed_day_status
     )
     assert res.status_code == 200
     data = res.json()
-    assert data["status"] == "rejected"
+    assert data["status"] == "declined"
     assert data["decline_reason"] == "Maintenance scheduled"
 
 

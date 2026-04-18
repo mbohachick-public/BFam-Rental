@@ -1,5 +1,9 @@
-from datetime import date
-from typing import Annotated
+import logging
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from typing import Annotated, Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from supabase import Client
@@ -8,6 +12,7 @@ from app.config import get_settings
 from app.deps import get_supabase_client, require_admin
 from app.schemas import (
     AvailabilityBulkUpdate,
+    BookingApproveBody,
     BookingDeclineBody,
     BookingRequestOut,
     BookingRequestStatus,
@@ -20,6 +25,10 @@ from app.schemas import (
     ItemImageOut,
     ItemSummary,
     ItemUpdate,
+    PaymentPath,
+    ResendSignatureOut,
+    StripeCheckoutSessionOut,
+    StripeCheckoutSyncOut,
 )
 from app.repos.item_images import load_images_for_items
 from app.services.booking_response import booking_out_from_row
@@ -33,22 +42,79 @@ from app.services.item_images_storage import (
     try_delete_item_image_for_url,
 )
 from app.services.e2e_cleanup import cleanup_e2e_test_items
-from app.services.quote_email import send_booking_declined_email
+from app.services.booking_events import log_booking_event
+from app.services.contract_signing import create_signing_package, signing_url
+from app.services.quote_email import (
+    send_booking_approved_email,
+    send_booking_declined_email,
+)
+from app.services.stripe_checkout import create_checkout_session_for_booking
+from app.services.stripe_deposit_refund import refund_stripe_deposit_for_booking
+from app.services.stripe_payment_reconcile import sync_booking_checkout_sessions_from_stripe
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
-def _decimal(v: object):
-    from decimal import Decimal
-
+def _decimal(v: object) -> Decimal:
     return Decimal(str(v))
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _payment_collection_url_from_template(settings, booking_id: str) -> str | None:
+    t = (settings.payment_collection_url_template or "").strip()
+    if not t:
+        return None
+    return t.replace("{booking_id}", booking_id).replace("{id}", booking_id)
+
+
+def _try_create_card_checkout_sessions(
+    client: Client, settings, booking_id: str
+) -> dict[str, Any] | None:
+    """Create Stripe Checkout sessions when possible; returns None if Stripe is not configured."""
+    if not (settings.stripe_secret_key or "").strip():
+        return None
+    try:
+        return create_checkout_session_for_booking(client, settings, booking_id=booking_id)
+    except ValueError as e:
+        logger.warning("stripe_checkout_at_email_skipped booking_id=%s err=%s", booking_id, e)
+        return None
+
+
+_APPROVABLE_STATUSES = frozenset(
+    {
+        BookingRequestStatus.requested.value,
+        BookingRequestStatus.under_review.value,
+        BookingRequestStatus.pending.value,
+    }
+)
+
+_DECLINABLE_STATUSES = frozenset(
+    {
+        BookingRequestStatus.requested.value,
+        BookingRequestStatus.under_review.value,
+        BookingRequestStatus.pending.value,
+        BookingRequestStatus.approved_awaiting_signature.value,
+        BookingRequestStatus.approved_pending_payment.value,
+        BookingRequestStatus.approved_pending_check_clearance.value,
+    }
+)
+
+_PRE_CONFIRM_APPROVED = frozenset(
+    {
+        BookingRequestStatus.approved_pending_payment.value,
+        BookingRequestStatus.approved_pending_check_clearance.value,
+    }
+)
 
 
 def _load_item_detail(client: Client, item_id: str) -> ItemDetail:
     res = (
         client.table("items")
         .select(
-            "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,active"
+            "id,title,description,category,cost_per_day,minimum_day_rental,deposit_amount,user_requirements,towable,delivery_available,active"
         )
         .eq("id", item_id)
         .limit(1)
@@ -78,6 +144,7 @@ def _load_item_detail(client: Client, item_id: str) -> ItemDetail:
         minimum_day_rental=int(row["minimum_day_rental"]),
         deposit_amount=_decimal(row["deposit_amount"]),
         towable=bool(row.get("towable", False)),
+        delivery_available=bool(row.get("delivery_available", True)),
         image_urls=urls,
         description=row["description"],
         user_requirements=row["user_requirements"],
@@ -100,6 +167,7 @@ def admin_create_item(body: ItemCreate, client: Client = Depends(get_supabase_cl
                 "deposit_amount": float(body.deposit_amount),
                 "user_requirements": body.user_requirements,
                 "towable": body.towable,
+                "delivery_available": body.delivery_available,
                 "active": body.active,
             }
         )
@@ -138,6 +206,8 @@ def admin_update_item(
         patch["user_requirements"] = body.user_requirements
     if body.towable is not None:
         patch["towable"] = body.towable
+    if body.delivery_available is not None:
+        patch["delivery_available"] = body.delivery_available
     if body.active is not None:
         patch["active"] = body.active
     if patch:
@@ -248,13 +318,14 @@ def admin_set_availability(
 
 
 @router.get("/booking-requests", response_model=list[BookingRequestOut])
-def admin_list_bookings(client: Client = Depends(get_supabase_client)) -> list[BookingRequestOut]:
-    res = (
-        client.table("booking_requests")
-        .select("*")
-        .order("created_at", desc=True)
-        .execute()
-    )
+def admin_list_bookings(
+    client: Client = Depends(get_supabase_client),
+    status: str | None = None,
+) -> list[BookingRequestOut]:
+    q = client.table("booking_requests").select("*")
+    if status and status.strip():
+        q = q.eq("status", status.strip())
+    res = q.order("created_at", desc=True).execute()
     return [
         booking_out_from_row(client, row, sign_document_urls=True)
         for row in (res.data or [])
@@ -275,8 +346,252 @@ def admin_booking_license_plate_file(
     return admin_booking_file_response(client, request_id, "license-plate")
 
 
-@router.post("/booking-requests/{request_id}/accept", response_model=BookingRequestOut)
-def admin_accept_booking(
+@router.post("/booking-requests/{request_id}/approve", response_model=BookingRequestOut)
+def admin_approve_booking(
+    request_id: str,
+    body: BookingApproveBody,
+    client: Client = Depends(get_supabase_client),
+) -> BookingRequestOut:
+    settings = get_settings()
+    res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Booking request not found")
+    row = rows[0]
+    st = str(row.get("status") or "")
+    if st not in _APPROVABLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Only requested / under_review / legacy pending bookings can be approved.",
+        )
+    if body.payment_path == PaymentPath.business_check:
+        if not str(row.get("company_name") or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Company name is required on the booking before business_check approval.",
+            )
+    item_res = (
+        client.table("items")
+        .select("title")
+        .eq("id", row["item_id"])
+        .limit(1)
+        .execute()
+    )
+    item_title = str((item_res.data or [{}])[0].get("title") or "Rental item")
+    try:
+        raw_token = create_signing_package(
+            client,
+            settings,
+            booking_id=request_id,
+            booking_row=row,
+            item_title=item_title,
+            payment_path=body.payment_path,
+        )
+    except Exception as exc:
+        logger.exception(
+            "create_signing_package failed for booking %s (apply Specs/supabase-migration-contract-signing-*.sql if missing tables/enum)",
+            request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Could not create signing package. Apply contract-signing SQL migrations "
+                f"(see Specs/contract-signing/README.md). ({exc})"
+            ),
+        ) from exc
+    next_status = BookingRequestStatus.approved_awaiting_signature.value
+    pay_url = _payment_collection_url_from_template(settings, request_id)
+    now = _now_iso()
+    client.table("booking_requests").update(
+        {
+            "status": next_status,
+            "payment_path": body.payment_path.value,
+            "approved_at": now,
+            **({"payment_collection_url": pay_url} if pay_url is not None else {}),
+        }
+    ).eq("id", request_id).execute()
+    log_booking_event(
+        client,
+        booking_id=request_id,
+        event_type="approved",
+        actor_type="admin",
+        metadata={"payment_path": body.payment_path.value, "status": next_status},
+    )
+    res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    row2 = res2.data[0]
+    if body.payment_path == PaymentPath.card:
+        _try_create_card_checkout_sessions(client, settings, request_id)
+        res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+        row2 = res2.data[0]
+    sign_url = signing_url(settings, raw_token)
+    to_addr = (row2.get("customer_email") or "").strip()
+    if to_addr:
+        send_booking_approved_email(
+            settings,
+            to_addr=to_addr,
+            item_title=item_title,
+            start_date=str(row2["start_date"]),
+            end_date=str(row2["end_date"]),
+            rental_total_with_tax=_decimal(row2.get("rental_total_with_tax") or 0),
+            deposit_amount=_decimal(row2.get("deposit_amount") or 0),
+            payment_collection_url=row2.get("payment_collection_url") or pay_url,
+            signing_url=sign_url,
+            rental_checkout_url=row2.get("stripe_checkout_url"),
+            deposit_checkout_url=row2.get("stripe_deposit_checkout_url"),
+            payment_path=body.payment_path.value,
+        )
+    return booking_out_from_row(client, row2, sign_document_urls=True, signing_url=sign_url)
+
+
+@router.post(
+    "/booking-requests/{request_id}/resend-signature",
+    response_model=ResendSignatureOut,
+)
+def admin_resend_signature_link(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> ResendSignatureOut:
+    settings = get_settings()
+    res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Booking request not found")
+    row = rows[0]
+    if str(row.get("status") or "") != BookingRequestStatus.approved_awaiting_signature.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Resend is only available while awaiting customer signature.",
+        )
+    path_raw = row.get("payment_path")
+    if not path_raw:
+        raise HTTPException(status_code=400, detail="Booking is missing payment_path.")
+    try:
+        pp = PaymentPath(str(path_raw))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid payment_path on booking.") from e
+    item_res = (
+        client.table("items")
+        .select("title")
+        .eq("id", row["item_id"])
+        .limit(1)
+        .execute()
+    )
+    item_title = str((item_res.data or [{}])[0].get("title") or "Rental item")
+    raw_token = create_signing_package(
+        client,
+        settings,
+        booking_id=request_id,
+        booking_row=row,
+        item_title=item_title,
+        payment_path=pp,
+    )
+    sign_url = signing_url(settings, raw_token)
+    if pp == PaymentPath.card:
+        _try_create_card_checkout_sessions(client, settings, request_id)
+    res_row = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    row_f = (res_row.data or [row])[0]
+    to_addr = (row_f.get("customer_email") or "").strip()
+    if to_addr:
+        send_booking_approved_email(
+            settings,
+            to_addr=to_addr,
+            item_title=item_title,
+            start_date=str(row_f["start_date"]),
+            end_date=str(row_f["end_date"]),
+            rental_total_with_tax=_decimal(row_f.get("rental_total_with_tax") or 0),
+            deposit_amount=_decimal(row_f.get("deposit_amount") or 0),
+            payment_collection_url=row_f.get("payment_collection_url"),
+            signing_url=sign_url,
+            rental_checkout_url=row_f.get("stripe_checkout_url"),
+            deposit_checkout_url=row_f.get("stripe_deposit_checkout_url"),
+            payment_path=pp.value,
+        )
+    return ResendSignatureOut(signing_url=sign_url)
+
+
+@router.post(
+    "/booking-requests/{request_id}/stripe-checkout-session",
+    response_model=StripeCheckoutSessionOut,
+)
+def admin_create_stripe_checkout_session(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> StripeCheckoutSessionOut:
+    """Create Stripe Checkout for card path after signature (rental total + deposit when configured)."""
+    settings = get_settings()
+    try:
+        out = create_checkout_session_for_booking(client, settings, booking_id=request_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("stripe_checkout_session_failed booking_id=%s", request_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Stripe checkout could not be created: {e}",
+        ) from e
+    return StripeCheckoutSessionOut(
+        stripe_checkout_session_id=out["stripe_checkout_session_id"],
+        stripe_checkout_url=out["stripe_checkout_url"],
+        stripe_checkout_created_at=out["stripe_checkout_created_at"],
+        stripe_deposit_checkout_session_id=out.get("stripe_deposit_checkout_session_id"),
+        stripe_deposit_checkout_url=out.get("stripe_deposit_checkout_url"),
+        stripe_deposit_checkout_created_at=out.get("stripe_deposit_checkout_created_at"),
+        stripe_checkout_email_status="skipped_payment_links_in_approval_email",
+    )
+
+
+@router.post("/booking-requests/{request_id}/sync-stripe-checkout", response_model=StripeCheckoutSyncOut)
+def admin_sync_stripe_checkout(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> StripeCheckoutSyncOut:
+    """
+    Retrieve stored Checkout Session ids from Stripe; if Stripe shows paid, apply the same
+    updates as the webhook (for missed webhooks in dev or network blips).
+    """
+    settings = get_settings()
+    try:
+        result = sync_booking_checkout_sessions_from_stripe(client, settings, booking_id=request_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("admin_sync_stripe_checkout_failed booking_id=%s", request_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not sync with Stripe: {e}",
+        ) from e
+    res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res2.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking request not found")
+    return StripeCheckoutSyncOut(
+        actions=result.get("actions") or [],
+        booking=booking_out_from_row(client, rows[0], sign_document_urls=True),
+    )
+
+
+@router.post("/booking-requests/{request_id}/refund-stripe-deposit", response_model=BookingRequestOut)
+def admin_refund_stripe_deposit(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> BookingRequestOut:
+    """Partial Stripe refund for the security deposit (combined Checkout with deposit line only)."""
+    settings = get_settings()
+    try:
+        refund_stripe_deposit_for_booking(client, settings, booking_id=request_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+    except Exception as e:
+        logger.exception("admin_refund_stripe_deposit_failed booking_id=%s", request_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Stripe refund failed: {e}",
+        ) from e
+    res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res2.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Booking request not found")
+    return booking_out_from_row(client, rows[0], sign_document_urls=True)
+
+
+@router.post("/booking-requests/{request_id}/mark-rental-paid", response_model=BookingRequestOut)
+def admin_mark_rental_paid(
     request_id: str, client: Client = Depends(get_supabase_client)
 ) -> BookingRequestOut:
     res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
@@ -284,8 +599,93 @@ def admin_accept_booking(
     if not rows:
         raise HTTPException(status_code=404, detail="Booking request not found")
     row = rows[0]
-    if row["status"] != BookingRequestStatus.pending.value:
-        raise HTTPException(status_code=400, detail="Only pending requests can be accepted")
+    if str(row.get("status") or "") not in _PRE_CONFIRM_APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail="Rental paid can only be marked while awaiting payment or check clearance.",
+        )
+    client.table("booking_requests").update(
+        {"rental_paid_at": _now_iso(), "rental_payment_status": "paid"}
+    ).eq("id", request_id).execute()
+    log_booking_event(client, booking_id=request_id, event_type="rental_paid_marked", actor_type="admin")
+    res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
+
+
+@router.post("/booking-requests/{request_id}/mark-deposit-secured", response_model=BookingRequestOut)
+def admin_mark_deposit_secured(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> BookingRequestOut:
+    res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Booking request not found")
+    row = rows[0]
+    if str(row.get("status") or "") not in _PRE_CONFIRM_APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail="Deposit can only be marked while awaiting payment or check clearance.",
+        )
+    client.table("booking_requests").update({"deposit_secured_at": _now_iso()}).eq("id", request_id).execute()
+    log_booking_event(client, booking_id=request_id, event_type="deposit_secured_marked", actor_type="admin")
+    res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
+
+
+@router.post("/booking-requests/{request_id}/mark-agreement-signed", response_model=BookingRequestOut)
+def admin_mark_agreement_signed(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> BookingRequestOut:
+    res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Booking request not found")
+    row = rows[0]
+    if str(row.get("status") or "") not in _PRE_CONFIRM_APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail="Agreement can only be marked while awaiting payment or check clearance.",
+        )
+    client.table("booking_requests").update({"agreement_signed_at": _now_iso()}).eq("id", request_id).execute()
+    log_booking_event(client, booking_id=request_id, event_type="agreement_signed_marked", actor_type="admin")
+    res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
+
+
+@router.post("/booking-requests/{request_id}/confirm", response_model=BookingRequestOut)
+def admin_confirm_booking(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> BookingRequestOut:
+    res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Booking request not found")
+    row = rows[0]
+    st = str(row.get("status") or "")
+    if st not in _PRE_CONFIRM_APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail="Only approved (awaiting payment) bookings can be confirmed.",
+        )
+    missing: list[str] = []
+    rp = str(row.get("rental_payment_status") or "").strip().lower()
+    if not row.get("rental_paid_at") and rp != "paid":
+        missing.append("rental_paid_at")
+    dep_need = False
+    try:
+        d0 = row.get("deposit_amount")
+        dep_need = d0 is not None and Decimal(str(d0)) > 0
+    except Exception:
+        dep_need = row.get("deposit_amount") is not None
+    if dep_need and not row.get("deposit_secured_at"):
+        missing.append("deposit_secured_at")
+    if not row.get("agreement_signed_at"):
+        missing.append("agreement_signed_at")
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Confirm blocked until marked: {', '.join(missing)}.",
+        )
     item_id = row["item_id"]
     start = date.fromisoformat(str(row["start_date"]))
     end = date.fromisoformat(str(row["end_date"]))
@@ -295,12 +695,12 @@ def admin_accept_booking(
     ]
     if upsert_rows:
         client.table("item_day_status").upsert(upsert_rows).execute()
-    client.table("booking_requests").update({"status": BookingRequestStatus.accepted.value}).eq(
+    client.table("booking_requests").update({"status": BookingRequestStatus.confirmed.value}).eq(
         "id", request_id
     ).execute()
+    log_booking_event(client, booking_id=request_id, event_type="confirmed", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
-    row2 = res2.data[0]
-    return booking_out_from_row(client, row2, sign_document_urls=True)
+    return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 
 @router.post("/booking-requests/{request_id}/decline", response_model=BookingRequestOut)
@@ -315,8 +715,12 @@ def admin_decline_booking(
     if not rows:
         raise HTTPException(status_code=404, detail="Booking request not found")
     row = rows[0]
-    if row["status"] != BookingRequestStatus.pending.value:
-        raise HTTPException(status_code=400, detail="Only pending requests can be declined")
+    st = str(row.get("status") or "")
+    if st not in _DECLINABLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="This booking cannot be declined from its current status.",
+        )
     item_id = row["item_id"]
     item_res = (
         client.table("items")
@@ -338,7 +742,7 @@ def admin_decline_booking(
         client.table("item_day_status").upsert(reopen_rows).execute()
     client.table("booking_requests").update(
         {
-            "status": BookingRequestStatus.rejected.value,
+            "status": BookingRequestStatus.declined.value,
             "decline_reason": body.reason,
         }
     ).eq("id", request_id).execute()
@@ -355,6 +759,13 @@ def admin_decline_booking(
             end_date=end.isoformat(),
             reason=body.reason,
         )
+    log_booking_event(
+        client,
+        booking_id=request_id,
+        event_type="declined",
+        actor_type="admin",
+        metadata={"reason": body.reason},
+    )
     return booking_out_from_row(
         client, row2, sign_document_urls=True, decline_email_sent=email_sent
     )
@@ -378,6 +789,7 @@ def admin_list_items(client: Client = Depends(get_supabase_client)) -> list[Item
                 minimum_day_rental=int(row["minimum_day_rental"]),
                 deposit_amount=_decimal(row["deposit_amount"]),
                 towable=bool(row.get("towable", False)),
+                delivery_available=bool(row.get("delivery_available", True)),
                 image_urls=urls,
                 active=bool(row.get("active", True)),
             )

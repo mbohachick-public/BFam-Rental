@@ -4,7 +4,25 @@ export type DayStatus =
   | 'open_for_booking'
   | 'readying_for_use'
 
-export type BookingRequestStatus = 'pending' | 'accepted' | 'rejected'
+export type BookingRequestStatus =
+  | 'pending'
+  | 'requested'
+  | 'under_review'
+  | 'approved_awaiting_signature'
+  | 'approved_pending_payment'
+  | 'approved_pending_check_clearance'
+  | 'confirmed'
+  | 'ready_for_pickup'
+  | 'checked_out'
+  | 'returned_pending_inspection'
+  | 'completed'
+  | 'completed_with_charges'
+  | 'cancelled'
+  | 'declined'
+  | 'accepted'
+  | 'rejected'
+
+export type PaymentPath = 'card' | 'ach' | 'business_check'
 
 export interface ItemImage {
   id: string
@@ -20,6 +38,8 @@ export interface ItemSummary {
   minimum_day_rental: number
   deposit_amount: string
   towable?: boolean
+  /** When true, catalog/detail may show delivery as an option */
+  delivery_available?: boolean
   image_urls: string[]
   /** false = hidden from public catalog; admins still see the item */
   active?: boolean
@@ -67,6 +87,11 @@ export interface CustomerBookingSummary {
   discounted_subtotal?: string | null
   rental_total_with_tax?: string | null
   deposit_amount?: string | null
+  /** Present when the rental team has approved the request and set a pay link */
+  payment_collection_url?: string | null
+  /** Stripe Checkout URL after admin generates it (card path). */
+  stripe_checkout_url?: string | null
+  stripe_deposit_checkout_url?: string | null
 }
 
 /** GET /booking-requests/me/contact */
@@ -116,4 +141,95 @@ export interface BookingRequestOut {
   sales_tax_source?: string | null
   drivers_license_url?: string | null
   license_plate_url?: string | null
+  company_name?: string | null
+  delivery_address?: string | null
+  payment_method_preference?: string | null
+  is_repeat_contractor?: boolean | null
+  tow_vehicle_year?: number | null
+  tow_vehicle_make?: string | null
+  tow_vehicle_model?: string | null
+  tow_vehicle_tow_rating_lbs?: number | null
+  has_brake_controller?: boolean | null
+  request_not_confirmed_ack?: boolean | null
+  payment_path?: string | null
+  payment_collection_url?: string | null
+  approved_at?: string | null
+  rental_paid_at?: string | null
+  deposit_secured_at?: string | null
+  agreement_signed_at?: string | null
+  stripe_invoice_id?: string | null
+  stripe_checkout_session_id?: string | null
+  stripe_checkout_url?: string | null
+  stripe_payment_intent_id?: string | null
+  rental_payment_status?: 'unpaid' | 'paid' | 'failed' | 'refunded' | null
+  stripe_checkout_created_at?: string | null
+  /** Cents captured as deposit (legacy combined checkout, or echo from deposit session). */
+  stripe_deposit_captured_cents?: number | null
+  deposit_refunded_at?: string | null
+  stripe_deposit_refund_id?: string | null
+  stripe_deposit_checkout_session_id?: string | null
+  stripe_deposit_checkout_url?: string | null
+  stripe_deposit_checkout_created_at?: string | null
+  stripe_deposit_payment_intent_id?: string | null
+  /** Present on admin approve/resend only — copy to customer. */
+  signing_url?: string | null
+}
+
+export interface StripeCheckoutSessionOut {
+  stripe_checkout_session_id?: string | null
+  stripe_checkout_url?: string | null
+  stripe_checkout_created_at?: string | null
+  stripe_deposit_checkout_session_id?: string | null
+  stripe_deposit_checkout_url?: string | null
+  stripe_deposit_checkout_created_at?: string | null
+  /** Regenerate: `skipped_payment_links_in_approval_email` (links are in approve / resend emails). */
+  stripe_checkout_email_status?: string | null
+}
+
+/** POST /admin/booking-requests/:id/sync-stripe-checkout */
+export interface StripeCheckoutSyncOut {
+  actions: string[]
+  booking: BookingRequestOut
+}
+
+export interface BookingPaymentStatusPublic {
+  booking_id: string
+  status: string
+  rental_paid: boolean
+  rental_payment_status?: string | null
+  item_title: string
+}
+
+export interface BookingSignPageOut {
+  item_title: string
+  start_date: string
+  end_date: string
+  delivery_address?: string | null
+  rental_total_with_tax?: string | null
+  deposit_amount?: string | null
+  payment_path?: string | null
+  agreement_html: string
+  damage_html: string
+  expires_at: string
+}
+
+export interface BookingSignResultOut {
+  ok: boolean
+  next_status: string
+  next_url: string
+}
+
+export interface ResendSignatureOut {
+  signing_url: string
+}
+
+export interface BookingSignCompleteOut {
+  ok: boolean
+  message: string
+  booking_status?: string | null
+  payment_path?: string | null
+  stripe_checkout_url?: string | null
+  stripe_deposit_checkout_url?: string | null
+  rental_balance_paid?: boolean
+  deposit_secured?: boolean
 }

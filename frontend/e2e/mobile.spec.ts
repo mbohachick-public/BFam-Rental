@@ -137,7 +137,7 @@ test.describe('Mobile viewports', () => {
       await loginAsAdmin(page)
       await page.goto('/admin/bookings')
 
-      // If there's a pending booking, open decline
+      // If there's a booking row with Decline, open the modal
       const declineBtn = page.getByRole('button', { name: /decline/i }).first()
       if (await declineBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
         await declineBtn.click()

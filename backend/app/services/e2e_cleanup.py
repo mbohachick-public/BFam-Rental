@@ -37,6 +37,23 @@ def cleanup_e2e_test_items(settings: Settings, client: Client) -> tuple[int, int
         )
         for row in br:
             bookings_processed += 1
+            bid = str(row["id"])
+            try:
+                client.table("stripe_webhook_events").delete().eq("booking_id", bid).execute()
+            except Exception:
+                pass
+            try:
+                client.table("booking_action_tokens").delete().eq("booking_id", bid).execute()
+            except Exception:
+                pass
+            try:
+                client.table("booking_signatures").delete().eq("booking_id", bid).execute()
+            except Exception:
+                pass
+            try:
+                client.table("booking_documents").delete().eq("booking_id", bid).execute()
+            except Exception:
+                pass
             try_delete_booking_document(settings, client, row.get("drivers_license_path"))
             try_delete_booking_document(settings, client, row.get("license_plate_path"))
 

@@ -22,8 +22,11 @@ def refund_stripe_deposit_for_booking(
     booking_id: str,
 ) -> dict[str, Any]:
     """
-    Refund the deposit: full refund on stripe_deposit_payment_intent_id when present (separate
-    Checkout); otherwise partial refund on rental PI using stripe_deposit_captured_cents (legacy).
+    Release the security deposit: for a **separate** deposit PaymentIntent, if the amount is
+    only **authorized** (manual capture, status ``requires_capture``), **cancel** the
+    PaymentIntent to void the hold. If the deposit was **captured** (or legacy flow), create a
+    full **refund** on that PaymentIntent. For legacy **combined** checkout, partial refund on the
+    rental PaymentIntent using ``stripe_deposit_captured_cents``.
     """
     key = (settings.stripe_secret_key or "").strip()
     if not key:
@@ -48,13 +51,35 @@ def refund_stripe_deposit_for_booking(
 
     try:
         if dep_pi:
-            ref = stripe.Refund.create(
-                payment_intent=dep_pi,
-                reason="requested_by_customer",
-                metadata={"booking_id": booking_id, "refund_kind": "deposit"},
+            pi_obj = stripe.PaymentIntent.retrieve(dep_pi)
+            pi_status = str(
+                getattr(pi_obj, "status", None)
+                or (pi_obj.get("status") if isinstance(pi_obj, dict) else "")
             )
-            rid = str(ref.id)
-            amount_cents = getattr(ref, "amount", None)
+
+            if pi_status == "requires_capture":
+                # Card hold (manual capture) — no charge yet; void the authorization, do not create a Refund.
+                try:
+                    stripe.PaymentIntent.cancel(dep_pi)
+                except stripe.InvalidRequestError as e:
+                    em = (getattr(e, "message", None) or str(e) or "").lower()
+                    if "canceled" not in em and "has already been" not in em and "fully refunded" not in em:
+                        raise
+                rid = f"void:{dep_pi}"
+                amount_cents = None
+            elif pi_status == "canceled":
+                raise ValueError(
+                    "This security deposit was already voided in Stripe. If the booking still shows "
+                    "a deposit, use “Sync payment from Stripe” to refresh.",
+                )
+            else:
+                ref = stripe.Refund.create(
+                    payment_intent=dep_pi,
+                    reason="requested_by_customer",
+                    metadata={"booking_id": booking_id, "refund_kind": "deposit"},
+                )
+                rid = str(ref.id)
+                amount_cents = getattr(ref, "amount", None)
         else:
             cap_raw = row.get("stripe_deposit_captured_cents")
             try:
@@ -100,6 +125,7 @@ def refund_stripe_deposit_for_booking(
             "amount_cents": amount_cents,
             "payment_intent_id": dep_pi or rental_pi,
             "separate_deposit_pi": bool(dep_pi),
+            "release_kind": "void_authorization" if (dep_pi and rid.startswith("void:")) else "refund",
         },
     )
     logger.info(

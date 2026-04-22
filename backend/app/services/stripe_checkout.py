@@ -124,6 +124,10 @@ def create_checkout_session_for_booking(
         session = stripe.checkout.Session.create(
             mode="payment",
             customer_email=customer_email,
+            payment_intent_data={
+                # Rental balance is charged immediately (no manual capture / hold only).
+                "capture_method": "automatic",
+            },
             line_items=[
                 {
                     "price_data": {
@@ -162,6 +166,11 @@ def create_checkout_session_for_booking(
         session_d = stripe.checkout.Session.create(
             mode="payment",
             customer_email=customer_email,
+            payment_intent_data={
+                # Security deposit: authorize only; capture only if you explicitly capture later
+                # (e.g. damages). Use cancel/void in admin to release the hold.
+                "capture_method": "manual",
+            },
             line_items=[
                 {
                     "price_data": {
@@ -178,6 +187,7 @@ def create_checkout_session_for_booking(
                 **base_meta,
                 "checkout_kind": "deposit",
                 "deposit_cents": str(_cents(deposit_amt)),
+                "deposit_capture_mode": "hold",
             },
         )
         dsid = str(session_d.id)
@@ -212,6 +222,8 @@ def create_checkout_session_for_booking(
             "rental_cents": _cents(amount),
             "deposit_cents": out.get("deposit_cents") or 0,
             "separate_deposit_checkout": bool(out.get("stripe_deposit_checkout_session_id")),
+            "rental_capture": "automatic",
+            "deposit_capture": "hold" if out.get("stripe_deposit_checkout_session_id") else None,
         },
     )
 

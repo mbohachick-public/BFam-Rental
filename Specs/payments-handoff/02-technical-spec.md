@@ -307,14 +307,19 @@ Stripe for:
 - invoices
 - ACH
 - storing payment method
-- future support for authorization/capture flows
+- authorization and capture (card holds for deposits, immediate charge for rental balance)
+
+### Card-path Checkout behavior (implemented)
+- **Rental / balance (Stripe Checkout, rental line item):** `payment_intent.capture_method = automatic` — the customer is charged as soon as Checkout completes successfully.
+- **Security deposit (separate Stripe Checkout when configured):** `payment_intent.capture_method = manual` — only an **authorization (hold)** is placed on the card. No capture and no final charge until you explicitly call capture in Stripe (e.g. for damages) or the hold expires. Admin “release” uses **PaymentIntent cancel** to void the hold, not a Refund, while the PI is in `requires_capture`.
+- **Legacy “combined” single Checkout (older metadata `deposit_in_checkout=1`):** one session may still treat rental + deposit as a single charge in Stripe; new bookings should use **separate** checkouts (rental automatic, deposit hold).
 
 ### Phase 1 implementation
 Keep it simple:
 - create Stripe invoice or payment link after approval
-- create deposit payment or deposit authorization path
+- create separate Checkout sessions: rental (immediate) and optional deposit (authorization only)
 - store Stripe IDs on Payment/Deposit records
-- use Stripe webhooks to mark payment as paid
+- use Stripe webhooks to mark rental as paid and deposit as **secured** when paid or when the deposit PI is in `requires_capture` (hold)
 
 ### Webhooks
 At minimum handle:

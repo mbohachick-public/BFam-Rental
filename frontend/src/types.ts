@@ -163,7 +163,11 @@ export interface BookingRequestOut {
   stripe_payment_intent_id?: string | null
   rental_payment_status?: 'unpaid' | 'paid' | 'failed' | 'refunded' | null
   stripe_checkout_created_at?: string | null
-  /** Cents captured as deposit (legacy combined checkout, or echo from deposit session). */
+  /**
+   * Cents of deposit actually captured in Stripe, or 0 / unset when the deposit is only
+   * an auth hold (manual capture, separate deposit Checkout) until capture/refund/void.
+   * Legacy combined checkout may store the deposit portion in cents.
+   */
   stripe_deposit_captured_cents?: number | null
   deposit_refunded_at?: string | null
   stripe_deposit_refund_id?: string | null

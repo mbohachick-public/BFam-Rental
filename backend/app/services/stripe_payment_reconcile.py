@@ -64,7 +64,7 @@ def sync_booking_checkout_sessions_from_stripe(
     stripe.api_key = key
     actions: list[str] = []
     # Lazy import avoids circular import with app.routers.stripe_webhook at package load time.
-    from app.routers.stripe_webhook import _handle_checkout_session_completed
+    from app.routers.stripe_webhook import _deposit_checkout_satisfied, _handle_checkout_session_completed
 
     rental_sid = str(row.get("stripe_checkout_session_id") or "").strip()
     if rental_sid and not row.get("rental_paid_at"):
@@ -80,14 +80,14 @@ def sync_booking_checkout_sessions_from_stripe(
 
     deposit_sid = str(row.get("stripe_deposit_checkout_session_id") or "").strip()
     if deposit_sid and needs_deposit and not row.get("deposit_secured_at"):
-        sess_d = stripe.checkout.Session.retrieve(deposit_sid)
+        sess_d = stripe.checkout.Session.retrieve(deposit_sid, expand=["payment_intent"])
         dd = _session_to_dict(sess_d)
-        ps = str(dd.get("payment_status") or "").strip().lower()
-        if ps in ("paid", "no_payment_required"):
+        if _deposit_checkout_satisfied(dd):
             _handle_checkout_session_completed(client, dd)
             actions.append("deposit_checkout_applied")
             logger.info("stripe_reconcile_deposit booking_id=%s session_id=%s", booking_id, deposit_sid)
         else:
+            ps = str(dd.get("payment_status") or "").strip().lower()
             actions.append(f"deposit_checkout_skipped_payment_status={ps or 'empty'}")
 
     if not actions:

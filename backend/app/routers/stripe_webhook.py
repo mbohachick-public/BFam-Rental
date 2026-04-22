@@ -53,6 +53,49 @@ def _checkout_session_paid(session: dict) -> bool:
     return ps in ("paid", "no_payment_required")
 
 
+def _payment_intent_status_value(pi_obj) -> str | None:
+    if isinstance(pi_obj, dict):
+        return str(pi_obj.get("status") or "") or None
+    if pi_obj is None:
+        return None
+    s = getattr(pi_obj, "status", None)
+    return str(s) if s is not None else None
+
+
+def _session_payment_intent_authorized_for_manual_deposit(session: dict) -> bool:
+    """
+    For checkout sessions created with payment_intent_data.capture_method=manual, Stripe
+    may leave session.payment_status as `unpaid` while the card is authorized. In that
+    case the underlying PaymentIntent status is `requires_capture`.
+    """
+    if _checkout_session_paid(session):
+        return False
+    ps = str(session.get("payment_status") or "").strip().lower()
+    if ps not in ("unpaid", ""):
+        return False
+    pi_field = session.get("payment_intent")
+    if isinstance(pi_field, dict) and _payment_intent_status_value(pi_field) == "requires_capture":
+        return True
+    if isinstance(pi_field, dict) and pi_field.get("id"):
+        pi_id = str(pi_field["id"])
+    else:
+        pi_id = _payment_intent_id(session)
+    if not pi_id:
+        return False
+    try:
+        pi = stripe.PaymentIntent.retrieve(pi_id)
+    except stripe.StripeError:
+        logger.exception("stripe_webhook_deposit_retrieve_pi_failed session_id=%s", session.get("id"))
+        return False
+    return _payment_intent_status_value(pi) == "requires_capture"
+
+
+def _deposit_checkout_satisfied(session: dict) -> bool:
+    if _checkout_session_paid(session):
+        return True
+    return _session_payment_intent_authorized_for_manual_deposit(session)
+
+
 def _infer_checkout_kind_from_amounts(client: Client, booking_id: str, session: dict) -> str | None:
     """
     When Session metadata omits checkout_kind (older sessions, API quirks), infer from
@@ -147,15 +190,17 @@ def _handle_deposit_checkout_completed(client: Client, session: dict) -> None:
     if not booking_id:
         logger.error("stripe_webhook_missing_booking_id session_id=%s", session.get("id"))
         return
-    if not _checkout_session_paid(session):
+    if not _deposit_checkout_satisfied(session):
         logger.info(
-            "stripe_webhook_deposit_session_not_paid session_id=%s payment_status=%s",
+            "stripe_webhook_deposit_session_not_satisfied session_id=%s payment_status=%s",
             session.get("id"),
             session.get("payment_status"),
         )
         return
     now = datetime.now(timezone.utc).isoformat()
     pi = _payment_intent_id(session)
+    if not pi and isinstance(session.get("payment_intent"), dict):
+        pi = str((session.get("payment_intent") or {}).get("id") or "") or None
     dep_cents = 0
     try:
         dep_cents = int(str(meta.get("deposit_cents") or "0").strip() or "0")
@@ -173,11 +218,17 @@ def _handle_deposit_checkout_completed(client: Client, session: dict) -> None:
         )
         if br0 and br0[0].get("deposit_amount") is not None:
             dep_cents = _cents(Decimal(str(br0[0]["deposit_amount"])))
+    is_hold = _session_payment_intent_authorized_for_manual_deposit(session) and not _checkout_session_paid(
+        session
+    )
     upd: dict = {
         "deposit_secured_at": now,
         "stripe_deposit_payment_intent_id": pi,
     }
-    if dep_cents > 0:
+    if is_hold:
+        # Card authorized only; no capture. Release via PaymentIntent.cancel from admin.
+        upd["stripe_deposit_captured_cents"] = 0
+    elif dep_cents > 0:
         upd["stripe_deposit_captured_cents"] = dep_cents
     client.table("booking_requests").update(upd).eq("id", booking_id).execute()
     log_booking_event(
@@ -190,9 +241,14 @@ def _handle_deposit_checkout_completed(client: Client, session: dict) -> None:
             "stripe_payment_intent_id": pi,
             "checkout_kind": "deposit",
             "deposit_cents": dep_cents,
+            "deposit_hold": is_hold,
         },
     )
-    logger.info("stripe_webhook_deposit_secured booking_id=%s", booking_id)
+    logger.info(
+        "stripe_webhook_deposit_secured booking_id=%s hold=%s",
+        booking_id,
+        is_hold,
+    )
 
 
 def _handle_legacy_combined_checkout_completed(client: Client, session: dict) -> None:
@@ -349,6 +405,10 @@ async def stripe_webhook(request: Request, client: Client = Depends(get_supabase
 
     if _event_already_processed(client, event_id):
         return {"received": True, "duplicate": True}
+
+    sk = (settings.stripe_secret_key or "").strip()
+    if sk:
+        stripe.api_key = sk
 
     try:
         if event_type == "checkout.session.completed":

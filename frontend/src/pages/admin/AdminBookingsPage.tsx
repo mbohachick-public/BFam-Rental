@@ -220,8 +220,14 @@ export function AdminBookingsPage() {
     const separate =
       typeof row?.stripe_deposit_payment_intent_id === 'string' &&
       row.stripe_deposit_payment_intent_id.trim().length > 0
+    const isHold =
+      separate &&
+      row.deposit_secured_at &&
+      !row.stripe_deposit_captured_cents
     const msg = separate
-      ? 'Refund the full security deposit charge on Stripe? The rental payment is a separate charge and is not affected.'
+      ? isHold
+        ? 'Release the card hold for the security deposit? This cancels the authorization in Stripe; no charge was taken on the deposit yet. The rental charge is a separate payment and is not affected.'
+        : 'Refund the full security deposit charge on Stripe? The rental payment is a separate charge and is not affected.'
       : 'Issue a partial Stripe refund for the security deposit line on the combined rental payment? The rest of the rental charge stays captured.'
     if (!window.confirm(msg)) {
       return
@@ -407,6 +413,13 @@ export function AdminBookingsPage() {
                   <a href={r.stripe_deposit_checkout_url} target="_blank" rel="noreferrer">
                     open
                   </a>
+                </div>
+              ) : null}
+              {r.deposit_secured_at && r.stripe_deposit_payment_intent_id && !r.stripe_deposit_captured_cents ? (
+                <div className="muted small">
+                  {r.deposit_refunded_at
+                    ? `Security deposit (hold) voided ${r.deposit_refunded_at}${r.stripe_deposit_refund_id ? ` · ${truncateId(r.stripe_deposit_refund_id, 18)}` : ''}`
+                    : 'Security deposit: card hold (not captured) — use “Refund deposit (Stripe)” to void the hold in Stripe when appropriate.'}
                 </div>
               ) : null}
               {typeof r.stripe_deposit_captured_cents === 'number' && r.stripe_deposit_captured_cents > 0 ? (
@@ -613,7 +626,9 @@ export function AdminBookingsPage() {
                     disabled={busyId === r.id}
                     title={
                       (r.stripe_deposit_payment_intent_id || '').trim()
-                        ? 'Full refund on the separate deposit charge'
+                        ? r.deposit_secured_at && !r.stripe_deposit_captured_cents
+                          ? 'Void the separate deposit authorization hold in Stripe (no charge was taken yet), or refund if the deposit was captured'
+                          : 'Full refund on the separate deposit charge'
                         : 'Partial refund on the rental PaymentIntent for the deposit amount (legacy combined checkout)'
                     }
                     onClick={() => void refundStripeDeposit(r.id)}

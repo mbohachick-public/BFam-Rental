@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from supabase import Client
 
+from app.branding import LEGAL_BUSINESS_NAME
 from app.config import get_settings
 from app.deps import get_supabase_client
 from app.schemas import (
@@ -53,7 +54,7 @@ def get_sign_page(token: str, client: Client = Depends(get_supabase_client)) -> 
     if resolved.get("error") == "expired":
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail="This signing link has expired. Contact BFam Rentals for a new link.",
+            detail=f"This signing link has expired. Contact {LEGAL_BUSINESS_NAME} for a new link.",
         )
     if resolved.get("error") == "used":
         raise HTTPException(

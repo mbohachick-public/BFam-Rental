@@ -8,22 +8,19 @@ import smtplib
 from decimal import Decimal
 from email.message import EmailMessage
 
-from app.branding import CUSTOMER_BRAND_NAME, LEGAL_BUSINESS_NAME
+from app.branding import LEGAL_BUSINESS_NAME
 from app.config import Settings
 
 log = logging.getLogger(__name__)
 
 
 def _plain_signature_lines() -> list[str]:
-    return ["", "--", CUSTOMER_BRAND_NAME, LEGAL_BUSINESS_NAME]
+    return ["", "--", LEGAL_BUSINESS_NAME]
 
 
 def _email_signature_html() -> str:
-    b = html.escape(CUSTOMER_BRAND_NAME)
     leg = html.escape(LEGAL_BUSINESS_NAME)
-    return (
-        f'<p style="margin-top:1.5em;font-size:0.9em;color:#57534e">{b}<br/>{leg}</p>'
-    )
+    return f'<p style="margin-top:1.5em;font-size:0.9em;color:#57534e">{leg}</p>'
 
 
 def smtp_configured(settings: Settings) -> bool:
@@ -68,7 +65,7 @@ def send_quote_email(
     if not smtp_configured(settings):
         log.info("SMTP not configured; skipping quote email to %s", to_addr)
         return False
-    subject = f"{CUSTOMER_BRAND_NAME} — quote for {item_title}"
+    subject = f"{LEGAL_BUSINESS_NAME} — quote for {item_title}"
     rate_s = f"{sales_tax_rate_percent:f}".rstrip("0").rstrip(".")
     plain = "\n".join(
         [
@@ -125,7 +122,7 @@ def send_booking_received_email(
     if not smtp_configured(settings):
         log.info("SMTP not configured; skipping booking confirmation to %s", to_addr)
         return False
-    subject = f"{CUSTOMER_BRAND_NAME} — we received your request ({item_title})"
+    subject = f"{LEGAL_BUSINESS_NAME} — we received your request ({item_title})"
     rate_s = f"{sales_tax_rate_percent:f}".rstrip("0").rstrip(".")
     plain = "\n".join(
         [
@@ -223,7 +220,7 @@ def send_booking_approved_email(
     if not smtp_configured(settings):
         log.info("SMTP not configured; skipping approval notice to %s", to_addr)
         return False
-    subject = f"{CUSTOMER_BRAND_NAME} — next steps for your rental ({item_title})"
+    subject = f"{LEGAL_BUSINESS_NAME} — next steps for your rental ({item_title})"
     pp = (payment_path or "").strip().lower()
     rent_u = (rental_checkout_url or "").strip() or None
     dep_u = (deposit_checkout_url or "").strip() or None
@@ -257,7 +254,7 @@ def send_booking_approved_email(
     elif pp == "card" and not rent_u and not coll_u:
         pay_follow_plain = [
             "",
-            "Card checkout links will be added by BFam Rentals if Stripe is not yet configured on our side.",
+            f"Card checkout links will be added by {LEGAL_BUSINESS_NAME} if Stripe is not yet configured on our side.",
             "",
         ]
         pay_follow_html = '<p class="muted" style="font-size:0.9em">If no payment links appear above, our team will follow up with a secure Stripe link.</p>'
@@ -316,7 +313,7 @@ def send_signature_completed_email(
     if not smtp_configured(settings):
         log.info("SMTP not configured; skipping signature confirmation to %s", to_addr)
         return False
-    subject = f"{CUSTOMER_BRAND_NAME} — agreement signed ({item_title})"
+    subject = f"{LEGAL_BUSINESS_NAME} — agreement signed ({item_title})"
     pdf_note = f"\nExecuted packet saved at: {pdf_path}\n" if pdf_path else ""
     pay_plain = [
         "",
@@ -380,9 +377,9 @@ def send_stripe_checkout_ready_email(
         return "skipped_no_payment_links"
     has_both = bool(rent_u and dep_u)
     subject = (
-        f"{CUSTOMER_BRAND_NAME} — pay rental & deposit ({item_title})"
+        f"{LEGAL_BUSINESS_NAME} — pay rental & deposit ({item_title})"
         if has_both
-        else f"{CUSTOMER_BRAND_NAME} — payment link ({item_title})"
+        else f"{LEGAL_BUSINESS_NAME} — payment link ({item_title})"
     )
     dep = deposit_amount if deposit_amount is not None and deposit_amount > 0 else None
     amt_lines: list[str] = []
@@ -440,9 +437,9 @@ def send_stripe_checkout_ready_email(
         )
     plain_blocks.extend(
         [
-            "Pay rental first or deposit first — either order is fine unless BFam Rentals tells you otherwise.",
+            f"Pay rental first or deposit first — either order is fine unless {LEGAL_BUSINESS_NAME} tells you otherwise.",
             "",
-            "Questions? Reply to this email or contact BFam Rentals.",
+            f"Questions? Reply to this email or contact {LEGAL_BUSINESS_NAME}.",
             *_plain_signature_lines(),
         ]
     )
@@ -476,7 +473,7 @@ def send_booking_declined_email(
     if not smtp_configured(settings):
         log.info("SMTP not configured; skipping decline notice to %s", to_addr)
         return False
-    subject = f"{CUSTOMER_BRAND_NAME} — update on your request ({item_title})"
+    subject = f"{LEGAL_BUSINESS_NAME} — update on your request ({item_title})"
     plain = "\n".join(
         [
             "We are unable to approve your rental request for the dates below.",

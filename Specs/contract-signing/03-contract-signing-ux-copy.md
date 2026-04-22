@@ -1,19 +1,19 @@
-# BFam Rentals Contract + E-Sign UX Copy
+# Bohachick Rentals & Supply LLC — Contract + E-Sign UX Copy
 
 ## Booking Form Helper Text
 ### Confirmation notice
-**This is a booking request only. Your rental is not confirmed until BFam Rentals approves the request, receives your signed rental agreement, and secures payment/deposit requirements.**
+**This is a booking request only. Your rental is not confirmed until Bohachick Rentals & Supply LLC approves the request, receives your signed rental agreement, and secures payment/deposit requirements.**
 
 ### Payment method helper text
-**We accept card, ACH, and approved business checks. Business checks must clear before pickup.**
+**We accept card and ACH as payment preferences. Final payment and deposit are coordinated after approval.**
 
 ## Trailer Detail Page Copy
 ### Booking summary note
 **A refundable security deposit is required for all rentals. Requests are not confirmed until approved, signed, and paid.**
 
 ## Approval Email Subject Lines
-- Your BFam Rentals request is approved — complete your rental agreement
-- Action required: sign your BFam Rentals rental agreement
+- Your Bohachick Rentals & Supply LLC request is approved — complete your rental agreement
+- Action required: sign your Bohachick Rentals & Supply LLC rental agreement
 - Complete your rental agreement to confirm your booking
 
 ## Approval Email Body
@@ -41,7 +41,7 @@ Complete your rental agreement here:
 {{signing_link}}
 
 Thank you,
-BFam Rentals & Supply
+Bohachick Rentals & Supply LLC
 
 ## Sign Page Header
 **Complete Your Rental Agreement**
@@ -92,17 +92,11 @@ Please complete payment and deposit authorization to confirm your rental.
 
 Your agreement has been signed. Please complete ACH payment using the instructions provided. Your booking will be confirmed once payment is received.
 
-### Check
-**Agreement signed — check clearance required**
-
-Your signed agreement has been received. Your booking will remain pending until your approved business check is received and cleared, and any required deposit condition is satisfied.
-
 ## Booking Status Labels
 - Request submitted
 - Pending review
 - Approved — awaiting signature
 - Signed — awaiting payment
-- Signed — awaiting check clearance
 - Payment received — awaiting deposit
 - Confirmed
 - Active rental

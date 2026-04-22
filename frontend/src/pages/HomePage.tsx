@@ -1,14 +1,12 @@
 import { Link } from 'react-router-dom'
-import { DBA_NAME, LEGAL_BUSINESS_NAME, SERVICE_AREA_TAGLINE } from '../branding'
+import { LEGAL_BUSINESS_NAME, SERVICE_AREA_TAGLINE } from '../branding'
 
 export function HomePage() {
   return (
-    <div className="container page-home">
+    <div className="container">
       <section className="hero">
         <p className="hero-business muted">
-          <strong>{DBA_NAME}</strong>
-          <span className="hero-business-sep"> · </span>
-          <span>{LEGAL_BUSINESS_NAME}</span>
+          <strong>{LEGAL_BUSINESS_NAME}</strong>
         </p>
         <h1>Rent the equipment you need</h1>
         <p className="hero-lead">
@@ -28,16 +26,25 @@ export function HomePage() {
         </h2>
         <div className="grid-3">
           <div className="card card-pad">
-            <h3>Clear pricing</h3>
-            <p className="muted">Cost per day, deposits, and minimum rental shown up front.</p>
+            <h3>Quotes with tax &amp; deposit</h3>
+            <p className="muted">
+              Per-day rate, minimum rental, security deposit, and sales tax on your quote—so you can see
+              the numbers before you book.
+            </p>
           </div>
           <div className="card card-pad">
-            <h3>Live calendar</h3>
-            <p className="muted">See whether each item is open, booked, or in use by day.</p>
+            <h3>Day-by-day availability</h3>
+            <p className="muted">
+              Each item has a calendar with status by date: open, booked, out for use, and more—request
+              only the dates that are actually free.
+            </p>
           </div>
           <div className="card card-pad">
-            <h3>Request online</h3>
-            <p className="muted">Choose dates, get a quote by email, and submit your booking in one flow.</p>
+            <h3>Request, e-sign, and pay</h3>
+            <p className="muted">
+              Submit a booking with the documents we need, sign your rental agreement when your request
+              is approved, and pay the rental and deposit with secure Stripe checkouts.
+            </p>
           </div>
         </div>
       </section>

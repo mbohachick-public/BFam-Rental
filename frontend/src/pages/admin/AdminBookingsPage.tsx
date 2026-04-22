@@ -500,7 +500,6 @@ export function AdminBookingsPage() {
                       >
                         <option value="card">Card</option>
                         <option value="ach">ACH</option>
-                        <option value="business_check">Business check</option>
                       </select>
                     </label>
                     <button

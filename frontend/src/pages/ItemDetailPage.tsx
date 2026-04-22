@@ -51,7 +51,6 @@ export function ItemDetailPage() {
   const [notes, setNotes] = useState('')
   const [companyName, setCompanyName] = useState('')
   const [paymentPreference, setPaymentPreference] = useState<'card' | 'ach'>('card')
-  const [isRepeatContractor, setIsRepeatContractor] = useState(false)
   const [towYear, setTowYear] = useState('')
   const [towMake, setTowMake] = useState('')
   const [towModel, setTowModel] = useState('')
@@ -81,7 +80,6 @@ export function ItemDetailPage() {
     setActiveImageIdx(0)
     setCompanyName('')
     setPaymentPreference('card')
-    setIsRepeatContractor(false)
     setTowYear('')
     setTowMake('')
     setTowModel('')
@@ -266,7 +264,6 @@ export function ItemDetailPage() {
         request_not_confirmed_ack: true,
         company_name: companyName.trim() || undefined,
         payment_method_preference: paymentPreference,
-        is_repeat_contractor: isRepeatContractor,
       }
       if (item.towable) {
         presignBody.tow_vehicle_year = parseInt(towYear, 10)
@@ -451,9 +448,11 @@ export function ItemDetailPage() {
           {item.towable ? ' Towable rentals also require a photo of your tow vehicle’s license plate.' : ''}
         </p>
         <p className="muted small">
-          Accepted payment methods include card, ACH, and business check (when approved). Submitting
-          this form is a <strong>request only</strong> — it does not guarantee availability until the
-          rental team approves dates, payment, deposit, and agreement.
+          Payment preference is <strong>card</strong> or <strong>ACH</strong> — the rental team
+          will confirm how payment is completed after approval (often with secure online checkout
+          where applicable). Submitting this form is a <strong>request only</strong> — it does not
+          guarantee availability until the rental team approves dates, payment, deposit, and
+          agreement.
         </p>
         <div className="booking-grid">
           <label className="field">
@@ -584,14 +583,6 @@ export function ItemDetailPage() {
               <option value="card">Card</option>
               <option value="ach">ACH</option>
             </select>
-          </label>
-          <label className="field field-checkbox field-span">
-            <input
-              type="checkbox"
-              checked={isRepeatContractor}
-              onChange={(e) => setIsRepeatContractor(e.target.checked)}
-            />
-            <span>Repeat contractor / account with us</span>
           </label>
           {item.towable ? (
             <>

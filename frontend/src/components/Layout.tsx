@@ -1,10 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import {
-  DBA_NAME,
-  LEGAL_BUSINESS_NAME,
-  OFFER_TAGLINE,
-  SERVICE_AREA_TAGLINE,
-} from '../branding'
+import { LEGAL_BUSINESS_NAME, OFFER_TAGLINE, SERVICE_AREA_TAGLINE } from '../branding'
 import { useAuth } from '../context/AuthContext'
 import { useCustomerSession } from '../context/CustomerSessionContext'
 import { useAdminApiReady } from '../hooks/useAdminApiReady'
@@ -19,10 +14,9 @@ export function Layout() {
       <header className="site-header">
         <div className="container header-inner">
           <Link to="/" className="brand">
-            <img src="/logo.png" alt="" width={44} height={44} className="brand-logo" />
+            <img src="/favicon_v2.png" alt="" width={48} height={48} className="brand-logo" />
             <span className="brand-text">
-              <span className="brand-name">BFam</span>
-              <span className="brand-tag">Rentals &amp; Supply</span>
+              <span className="brand-name brand-name-legal">{LEGAL_BUSINESS_NAME}</span>
             </span>
           </Link>
           <nav className="nav-main" aria-label="Main">
@@ -84,9 +78,6 @@ export function Layout() {
       <footer className="site-footer">
         <div className="container footer-inner">
           <p className="footer-brand-line footer-legal-name">{LEGAL_BUSINESS_NAME}</p>
-          <p className="footer-dba">
-            DBA: <strong>{DBA_NAME}</strong>
-          </p>
           <p className="footer-offer">{OFFER_TAGLINE}</p>
           <p className="footer-service-area">{SERVICE_AREA_TAGLINE}</p>
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGetPublic } from '../api/client'
+import { LEGAL_BUSINESS_NAME } from '../branding'
 import type { BookingSignCompleteOut } from '../types'
 
 export function BookingSignCompletePage() {
@@ -84,7 +85,7 @@ export function BookingSignCompletePage() {
           <h2 className="h3">2) Pay security deposit</h2>
           <p className="muted">
             Separate checkout for the <strong>refundable security deposit</strong>. Complete this
-            after or before the rental payment unless BFam tells you otherwise.
+            after or before the rental payment unless {LEGAL_BUSINESS_NAME} tells you otherwise.
           </p>
           <p>
             <a className="btn btn-primary" href={depositUrl} target="_blank" rel="noreferrer">
@@ -102,14 +103,16 @@ export function BookingSignCompletePage() {
       )}
       {waitingForRentalLink ? (
         <p className="muted" style={{ marginTop: '1rem' }}>
-          <strong>Card payment:</strong> BFam Rentals will email you separate Stripe links for the
+          <strong>Card payment:</strong> {LEGAL_BUSINESS_NAME} will email you separate Stripe links
+          for the
           rental total and security deposit when they are ready. Check{' '}
           <Link to="/my-rentals">My rentals</Link> after signing in, or watch your inbox.
         </p>
       ) : null}
       {!pendingCard ? (
         <p className="muted">
-          Next: complete payment and deposit requirements using the instructions from BFam Rentals.
+          Next: complete payment and deposit requirements using the instructions from{' '}
+          {LEGAL_BUSINESS_NAME}.
           Your rental is not confirmed until those steps are complete.
         </p>
       ) : null}

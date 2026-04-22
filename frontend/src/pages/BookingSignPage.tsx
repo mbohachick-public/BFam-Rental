@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiGetPublic, apiPostPublic } from '../api/client'
+import { LEGAL_BUSINESS_NAME } from '../branding'
 import type { BookingSignPageOut, BookingSignResultOut } from '../types'
 
 function money(s: string | null | undefined) {
@@ -100,7 +101,7 @@ export function BookingSignPage() {
         <h1>Signing</h1>
         <p className="error-msg">{error ?? 'Unable to load this page.'}</p>
         <p className="muted small">
-          If your link expired, contact BFam Rentals for a new signing link.
+          If your link expired, contact {LEGAL_BUSINESS_NAME} for a new signing link.
         </p>
         <Link to="/catalog">Back to catalog</Link>
       </div>

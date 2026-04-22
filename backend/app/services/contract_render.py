@@ -7,6 +7,8 @@ import hashlib
 from decimal import Decimal
 from typing import Any
 
+from app.branding import LEGAL_BUSINESS_NAME
+
 
 DOCUMENT_VERSION = "2026-04-16"
 
@@ -55,10 +57,11 @@ def _ctx(booking: dict[str, Any], item_title: str) -> dict[str, str]:
 
 def render_rental_agreement_html(booking: dict[str, Any], item_title: str) -> str:
     c = _ctx(booking, item_title)
+    owner = html.escape(LEGAL_BUSINESS_NAME)
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Rental Agreement</title></head><body>
 <h1>Rental Agreement</h1>
 <p><strong>Version:</strong> {c["document_version"]}</p>
-<p>This Rental Agreement is between BFam Rentals &amp; Supply (the &quot;Owner&quot;) and {c["customer_first_name"]} {c["customer_last_name"]} (the &quot;Renter&quot;).</p>
+<p>This Rental Agreement is between {owner} (the &quot;Owner&quot;) and {c["customer_first_name"]} {c["customer_last_name"]} (the &quot;Renter&quot;).</p>
 <h2>Equipment</h2>
 <p><strong>Item:</strong> {c["item_title"]}</p>
 <p><strong>Rental period:</strong> {c["start_date"]} through {c["end_date"]}</p>
@@ -72,7 +75,7 @@ def render_rental_agreement_html(booking: dict[str, Any], item_title: str) -> st
 </ul>
 <h2>Terms (summary)</h2>
 <p>Renter agrees to operate the equipment lawfully, return it on time and in the same condition subject to ordinary wear, and pay for damage, misuse, late fees, cleaning, and missing items as described in the Damage &amp; Fee Schedule Addendum.</p>
-<p>Renter acknowledges the equipment is <strong>not released</strong> until payment and deposit requirements are satisfied and the booking is confirmed by BFam Rentals.</p>
+<p>Renter acknowledges the equipment is <strong>not released</strong> until payment and deposit requirements are satisfied and the booking is confirmed by {owner}.</p>
 <p><strong>Contact:</strong> {c["customer_email"]} · {c["customer_phone"]}<br/>{c["customer_address"]}</p>
 <p><strong>Company (if any):</strong> {c["company_name"]}</p>
 </body></html>"""
@@ -80,6 +83,7 @@ def render_rental_agreement_html(booking: dict[str, Any], item_title: str) -> st
 
 def render_damage_fee_schedule_html(booking: dict[str, Any], item_title: str) -> str:
     c = _ctx(booking, item_title)
+    owner = html.escape(LEGAL_BUSINESS_NAME)
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Damage Fee Schedule</title></head><body>
 <h1>Damage &amp; Fee Schedule Addendum</h1>
 <p><strong>Version:</strong> {c["document_version"]}</p>
@@ -90,7 +94,7 @@ def render_damage_fee_schedule_html(booking: dict[str, Any], item_title: str) ->
 <ul>
 <li><strong>Late return:</strong> additional daily rental rates until returned.</li>
 <li><strong>Cleaning / excessive debris:</strong> reasonable cleaning fee.</li>
-<li><strong>No-show / cancellation after confirmation:</strong> per BFam Rentals policy.</li>
+<li><strong>No-show / cancellation after confirmation:</strong> per {owner} policy.</li>
 </ul>
 <p>This addendum is part of the rental agreement for the equipment listed above.</p>
 </body></html>"""

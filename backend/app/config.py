@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     # Optional Auth0: when both are set, POST /booking-requests and /booking-requests/quote require a valid Bearer access token (audience = API identifier).
     auth0_domain: str = ""
+    # Optional: comma-separated extra Auth0 hostnames trusted for JWT iss + JWKS (e.g. default tenant
+    # dev-xxx.us.auth0.com) when auth0_domain is your custom login host or during migration. Empty = only auth0_domain.
+    auth0_domain_aliases: str = ""
     auth0_audience: str = ""
     # Admin via Auth0: comma-separated role names matched against JWT permissions, roles, or AUTH0_ADMIN_ROLES_CLAIM (default role name: admin).
     auth0_admin_roles: str = "admin"
@@ -96,6 +99,9 @@ class Settings(BaseSettings):
     stripe_checkout_include_deposit: bool = True
     # Success/cancel redirects for Checkout (SPA origin, no trailing slash). Defaults to frontend_public_url.
     app_base_url: str = ""
+    # Google Distance Matrix (server-side only) for delivery mileage when delivery is enabled.
+    google_maps_api_key: str = ""
+    google_maps_http_timeout_sec: float = 12.0
 
     @field_validator("supabase_url")
     @classmethod

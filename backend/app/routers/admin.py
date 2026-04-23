@@ -18,6 +18,8 @@ from app.schemas import (
     BookingRequestStatus,
     DayAvailability,
     DayStatus,
+    DeliverySettingsOut,
+    DeliverySettingsUpdate,
     E2eCleanupBody,
     E2eCleanupResult,
     ItemCreate,
@@ -29,6 +31,7 @@ from app.schemas import (
     ResendSignatureOut,
     StripeCheckoutSessionOut,
     StripeCheckoutSyncOut,
+    payment_path_from_stored,
 )
 from app.repos.item_images import load_images_for_items
 from app.services.booking_response import booking_out_from_row
@@ -44,6 +47,7 @@ from app.services.item_images_storage import (
 from app.services.e2e_cleanup import cleanup_e2e_test_items
 from app.services.booking_events import log_booking_event
 from app.services.contract_signing import create_signing_package, signing_url
+from app.services.delivery_pricing import load_delivery_settings_row
 from app.services.quote_email import (
     send_booking_approved_email,
     send_booking_declined_email,
@@ -151,6 +155,67 @@ def _load_item_detail(client: Client, item_id: str) -> ItemDetail:
         images=images,
         active=bool(row.get("active", True)),
     )
+
+
+def _delivery_settings_out(client: Client, settings) -> DeliverySettingsOut:
+    row = load_delivery_settings_row(client)
+    max_m = row.get("max_delivery_miles")
+    return DeliverySettingsOut(
+        id=int(row.get("id") or 1),
+        enabled=bool(row.get("enabled")),
+        origin_address=str(row.get("origin_address") or ""),
+        price_per_mile=_decimal(row.get("price_per_mile") or 0),
+        minimum_fee=_decimal(row.get("minimum_fee") or 0),
+        free_miles=_decimal(row.get("free_miles") or 0),
+        max_delivery_miles=_decimal(max_m) if max_m is not None else None,
+        google_maps_configured=bool((settings.google_maps_api_key or "").strip()),
+    )
+
+
+@router.get("/delivery-settings", response_model=DeliverySettingsOut)
+def admin_get_delivery_settings(
+    client: Client = Depends(get_supabase_client),
+) -> DeliverySettingsOut:
+    return _delivery_settings_out(client, get_settings())
+
+
+@router.patch("/delivery-settings", response_model=DeliverySettingsOut)
+def admin_patch_delivery_settings(
+    body: DeliverySettingsUpdate,
+    client: Client = Depends(get_supabase_client),
+) -> DeliverySettingsOut:
+    settings = get_settings()
+    raw = body.model_dump(exclude_unset=True)
+    if not raw:
+        return _delivery_settings_out(client, settings)
+    patch: dict[str, Any] = {}
+    if "enabled" in raw:
+        patch["enabled"] = raw["enabled"]
+    if "origin_address" in raw:
+        patch["origin_address"] = raw["origin_address"]
+    if "price_per_mile" in raw:
+        patch["price_per_mile"] = float(raw["price_per_mile"])
+    if "minimum_fee" in raw:
+        patch["minimum_fee"] = float(raw["minimum_fee"])
+    if "free_miles" in raw:
+        patch["free_miles"] = float(raw["free_miles"])
+    if "max_delivery_miles" in raw:
+        v = raw["max_delivery_miles"]
+        patch["max_delivery_miles"] = float(v) if v is not None else None
+    upd = client.table("delivery_settings").update(patch).eq("id", 1).execute()
+    if not (upd.data or []):
+        ins: dict[str, Any] = {
+            "id": 1,
+            "enabled": False,
+            "origin_address": "",
+            "price_per_mile": 0.0,
+            "minimum_fee": 0.0,
+            "free_miles": 0.0,
+            "max_delivery_miles": None,
+        }
+        ins.update(patch)
+        client.table("delivery_settings").insert(ins).execute()
+    return _delivery_settings_out(client, settings)
 
 
 @router.post("/items", response_model=ItemDetail, status_code=status.HTTP_201_CREATED)
@@ -364,12 +429,6 @@ def admin_approve_booking(
             status_code=400,
             detail="Only requested / under_review / legacy pending bookings can be approved.",
         )
-    if body.payment_path == PaymentPath.business_check:
-        if not str(row.get("company_name") or "").strip():
-            raise HTTPException(
-                status_code=400,
-                detail="Company name is required on the booking before business_check approval.",
-            )
     item_res = (
         client.table("items")
         .select("title")
@@ -417,12 +476,9 @@ def admin_approve_booking(
         actor_type="admin",
         metadata={"payment_path": body.payment_path.value, "status": next_status},
     )
+    _try_create_card_checkout_sessions(client, settings, request_id)
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
     row2 = res2.data[0]
-    if body.payment_path == PaymentPath.card:
-        _try_create_card_checkout_sessions(client, settings, request_id)
-        res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
-        row2 = res2.data[0]
     sign_url = signing_url(settings, raw_token)
     to_addr = (row2.get("customer_email") or "").strip()
     if to_addr:
@@ -465,7 +521,7 @@ def admin_resend_signature_link(
     if not path_raw:
         raise HTTPException(status_code=400, detail="Booking is missing payment_path.")
     try:
-        pp = PaymentPath(str(path_raw))
+        pp = payment_path_from_stored(path_raw)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid payment_path on booking.") from e
     item_res = (
@@ -484,9 +540,9 @@ def admin_resend_signature_link(
         item_title=item_title,
         payment_path=pp,
     )
+    client.table("booking_requests").update({"payment_path": PaymentPath.card.value}).eq("id", request_id).execute()
     sign_url = signing_url(settings, raw_token)
-    if pp == PaymentPath.card:
-        _try_create_card_checkout_sessions(client, settings, request_id)
+    _try_create_card_checkout_sessions(client, settings, request_id)
     res_row = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
     row_f = (res_row.data or [row])[0]
     to_addr = (row_f.get("customer_email") or "").strip()

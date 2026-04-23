@@ -59,40 +59,50 @@ def send_quote_email(
     sales_tax_rate_percent: Decimal,
     sales_tax_amount: Decimal,
     rental_total_with_tax: Decimal,
-    sales_tax_source: str,
     deposit_amount: Decimal,
+    delivery_fee: Decimal = Decimal("0"),
+    delivery_distance_miles: Decimal | None = None,
 ) -> bool:
     if not smtp_configured(settings):
         log.info("SMTP not configured; skipping quote email to %s", to_addr)
         return False
     subject = f"{LEGAL_BUSINESS_NAME} — quote for {item_title}"
     rate_s = f"{sales_tax_rate_percent:f}".rstrip("0").rstrip(".")
+    del_lines_plain: list[str] = []
+    del_lines_html: list[str] = []
+    if delivery_fee and delivery_fee > 0:
+        mi = ""
+        if delivery_distance_miles is not None:
+            mi = f" (~{delivery_distance_miles} mi one-way)"
+        del_lines_plain.append(f"Delivery fee{mi}: {_money(delivery_fee)}")
+        del_lines_html.append(
+            f"<li>Delivery fee{html.escape(mi)}: {_money(delivery_fee)}</li>"
+        )
     plain = "\n".join(
         [
             f"Quote for {item_title}",
             f"Dates: {start_date} → {end_date} ({num_days} days)",
             f"Rental subtotal: {_money(discounted_subtotal)}",
+            *del_lines_plain,
             f"Sales tax ({rate_s}%): {_money(sales_tax_amount)}",
             f"Rental total (with tax): {_money(rental_total_with_tax)}",
             f"Deposit (hold): {_money(deposit_amount)}",
-            f"Tax source: {sales_tax_source}",
             "",
             "This is an estimate. Submit a booking request on the site to proceed.",
             *_plain_signature_lines(),
         ]
     )
-    safe_src = html.escape(sales_tax_source)
     html_body = f"""\
 <html><body>
 <p><strong>Quote for {item_title}</strong></p>
 <p>Dates: {start_date} → {end_date} ({num_days} days)</p>
 <ul>
 <li>Rental subtotal: {_money(discounted_subtotal)}</li>
+{"".join(del_lines_html)}
 <li>Sales tax ({html.escape(rate_s)}%): {_money(sales_tax_amount)}</li>
 <li>Rental total (with tax): {_money(rental_total_with_tax)}</li>
 <li>Deposit (hold): {_money(deposit_amount)}</li>
 </ul>
-<p class="muted" style="font-size:0.9em">Tax source: {safe_src}</p>
 <p>This is an estimate. Submit a booking request on the site to proceed.</p>
 {_email_signature_html()}
 </body></html>"""
@@ -101,65 +111,6 @@ def send_quote_email(
         return True
     except Exception as e:
         log.warning("Failed to send quote email: %s", e)
-        return False
-
-
-def send_booking_received_email(
-    settings: Settings,
-    *,
-    to_addr: str,
-    item_title: str,
-    start_date: str,
-    end_date: str,
-    num_days: int,
-    discounted_subtotal: Decimal,
-    sales_tax_rate_percent: Decimal,
-    sales_tax_amount: Decimal,
-    rental_total_with_tax: Decimal,
-    sales_tax_source: str,
-    deposit_amount: Decimal,
-) -> bool:
-    if not smtp_configured(settings):
-        log.info("SMTP not configured; skipping booking confirmation to %s", to_addr)
-        return False
-    subject = f"{LEGAL_BUSINESS_NAME} — we received your request ({item_title})"
-    rate_s = f"{sales_tax_rate_percent:f}".rstrip("0").rstrip(".")
-    plain = "\n".join(
-        [
-            "Thanks — your booking request was received.",
-            f"Item: {item_title}",
-            f"Dates: {start_date} → {end_date} ({num_days} days)",
-            f"Rental subtotal: {_money(discounted_subtotal)}",
-            f"Sales tax ({rate_s}%): {_money(sales_tax_amount)}",
-            f"Rental total (with tax): {_money(rental_total_with_tax)}",
-            f"Deposit (hold): {_money(deposit_amount)}",
-            f"Tax source: {sales_tax_source}",
-            "",
-            "We will follow up when your request is reviewed.",
-            *_plain_signature_lines(),
-        ]
-    )
-    safe_src = html.escape(sales_tax_source)
-    html_body = f"""\
-<html><body>
-<p>Thanks — your <strong>booking request</strong> was received.</p>
-<p><strong>{item_title}</strong><br/>
-{start_date} → {end_date} ({num_days} days)</p>
-<ul>
-<li>Rental subtotal: {_money(discounted_subtotal)}</li>
-<li>Sales tax ({html.escape(rate_s)}%): {_money(sales_tax_amount)}</li>
-<li>Rental total (with tax): {_money(rental_total_with_tax)}</li>
-<li>Deposit (hold): {_money(deposit_amount)}</li>
-</ul>
-<p class="muted" style="font-size:0.9em">Tax source: {safe_src}</p>
-<p>We will follow up when your request is reviewed.</p>
-{_email_signature_html()}
-</body></html>"""
-    try:
-        _send_message(settings, to_addr, subject, plain, html_body)
-        return True
-    except Exception as e:
-        log.warning("Failed to send booking confirmation email: %s", e)
         return False
 
 
@@ -263,6 +214,15 @@ def send_booking_approved_email(
             pay_follow_plain = ["", "Payment / next steps:", coll_u, ""]
             pay_follow_html = f'<p><strong>Payment / next steps</strong><br/><a href="{html.escape(coll_u, quote=True)}">Open link</a></p>'
 
+    stripe_footer = ""
+    if pp == "card" and (rent_u or dep_u):
+        stripe_footer = " You may complete Stripe checkouts in any order unless we tell you otherwise."
+    closing = (
+        "Equipment is not released until every required step is complete "
+        "(signed agreement, payment, and deposit as applicable)."
+        + stripe_footer
+    )
+
     plain = "\n".join(
         [
             "Your rental request was approved for the dates below.",
@@ -275,7 +235,7 @@ def send_booking_approved_email(
             "",
             *plain_step_lines,
             *pay_follow_plain,
-            "Equipment is not released until every step above is complete. You may complete Stripe checkouts in any order unless we tell you otherwise.",
+            closing,
             *_plain_signature_lines(),
         ]
     )
@@ -290,7 +250,7 @@ def send_booking_approved_email(
 <li>Deposit (hold): {_money(deposit_amount)}</li>
 </ul>
 {stepper_html}
-<p style="font-size:0.95em">Use the links in the checklist above. Your booking is <strong>not confirmed</strong> until every step is done.</p>
+<p style="font-size:0.95em">Use the checklist above (and any payment details below). Your booking is <strong>not confirmed</strong> until every step is done.</p>
 {pay_follow_html}
 {_email_signature_html()}
 </body></html>"""

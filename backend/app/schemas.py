@@ -11,6 +11,7 @@ class DayStatus(str, Enum):
     booked = "booked"
     open_for_booking = "open_for_booking"
     readying_for_use = "readying_for_use"
+    pending_request = "pending_request"
 
 
 class BookingRequestStatus(str, Enum):
@@ -34,17 +35,18 @@ class BookingRequestStatus(str, Enum):
     rejected = "rejected"
 
 
-class PaymentMethodPreference(str, Enum):
-    card = "card"
-    ach = "ach"
-
-
 class PaymentPath(str, Enum):
-    """Admin-selected collection path when approving."""
+    """Collection path when approving — product is card (Stripe) only."""
 
     card = "card"
-    ach = "ach"
-    business_check = "business_check"
+
+
+def payment_path_from_stored(value: object) -> PaymentPath:
+    """Normalize a DB ``payment_path`` for API use. Legacy non-card values map to ``card``."""
+    raw = str(value or "").strip().lower()
+    if not raw:
+        raise ValueError("payment_path is empty")
+    return PaymentPath.card
 
 
 class RentalPaymentStatus(str, Enum):
@@ -93,10 +95,11 @@ class BookingQuote(BaseModel):
     discount_percent: Decimal
     discounted_subtotal: Decimal
     deposit_amount: Decimal
+    delivery_fee: Decimal = Decimal("0")
+    delivery_distance_miles: Decimal | None = None
     sales_tax_rate_percent: Decimal
     sales_tax_amount: Decimal
     rental_total_with_tax: Decimal
-    sales_tax_source: str
     email_sent: bool = False
 
 
@@ -108,6 +111,14 @@ class BookingQuoteRequest(BaseModel):
     end_date: date
     customer_email: EmailStr
     tax_postal_code: str | None = Field(default=None, max_length=16)
+    delivery_requested: bool = False
+    delivery_address: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _delivery_address_when_requested(self) -> Self:
+        if self.delivery_requested and not (self.delivery_address or "").strip():
+            raise ValueError("delivery_address is required when delivery_requested is true.")
+        return self
 
 
 class BookingContactForm(BaseModel):
@@ -147,7 +158,6 @@ class BookingPresignRequest(BookingContactForm):
     drivers_license_content_type: str = Field(..., min_length=3, max_length=80)
     license_plate_content_type: str | None = Field(default=None, max_length=80)
     company_name: str | None = Field(default=None, max_length=200)
-    payment_method_preference: PaymentMethodPreference = PaymentMethodPreference.card
     is_repeat_contractor: bool = False
     tow_vehicle_year: int | None = Field(default=None, ge=1950, le=2100)
     tow_vehicle_make: str | None = Field(default=None, max_length=80)
@@ -155,6 +165,8 @@ class BookingPresignRequest(BookingContactForm):
     tow_vehicle_tow_rating_lbs: int | None = Field(default=None, ge=0)
     has_brake_controller: bool | None = None
     request_not_confirmed_ack: bool = False
+    delivery_requested: bool = False
+    delivery_address: str | None = Field(default=None, max_length=500)
 
     @field_validator("request_not_confirmed_ack")
     @classmethod
@@ -162,6 +174,13 @@ class BookingPresignRequest(BookingContactForm):
         if not v:
             raise ValueError("You must acknowledge that this is a request, not a confirmed reservation.")
         return v
+
+    @model_validator(mode="after")
+    def _delivery_address_when_requested_presign(self) -> Self:
+        if self.delivery_requested and not (self.delivery_address or "").strip():
+            raise ValueError("delivery_address is required when delivery_requested is true.")
+        return self
+
 
 class BookingPresignResponse(BaseModel):
     booking_id: str
@@ -240,6 +259,9 @@ class BookingRequestOut(BaseModel):
     decline_email_sent: bool | None = None
     company_name: str | None = None
     delivery_address: str | None = None
+    delivery_requested: bool | None = None
+    delivery_fee: Decimal | None = None
+    delivery_distance_miles: Decimal | None = None
     payment_method_preference: str | None = None
     is_repeat_contractor: bool | None = None
     tow_vehicle_year: int | None = None
@@ -299,12 +321,14 @@ class BookingPaymentStatusPublic(BaseModel):
     rental_paid: bool
     rental_payment_status: str | None = None
     item_title: str
+    deposit_secured: bool = False
+    requires_deposit: bool = False
 
 
 class BookingApproveBody(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    payment_path: PaymentPath
+    payment_path: PaymentPath = PaymentPath.card
 
 
 class BookingSignAcknowledgments(BaseModel):
@@ -319,7 +343,8 @@ class BookingSignSubmit(BaseModel):
 
     signer_name: str = Field(..., min_length=1, max_length=200)
     company_name: str | None = Field(default=None, max_length=200)
-    signer_email: EmailStr
+    #: Omitted or empty → use ``customer_email`` on the booking (signing link is already secret).
+    signer_email: EmailStr | None = None
     typed_signature: str = Field(..., min_length=1, max_length=200)
     acknowledgments: BookingSignAcknowledgments
 
@@ -344,6 +369,10 @@ class BookingSignPageOut(BaseModel):
     rental_total_with_tax: str | None
     deposit_amount: str | None
     payment_path: str | None
+    customer_first_name: str | None = None
+    customer_last_name: str | None = None
+    customer_email: str | None = None
+    company_name: str | None = None
     agreement_html: str
     damage_html: str
     expires_at: str
@@ -358,6 +387,7 @@ class BookingSignResultOut(BaseModel):
 class BookingSignCompleteOut(BaseModel):
     ok: bool
     message: str
+    booking_id: str
     booking_status: str | None = None
     payment_path: str | None = None
     stripe_checkout_url: str | None = None
@@ -368,6 +398,30 @@ class BookingSignCompleteOut(BaseModel):
 
 class ResendSignatureOut(BaseModel):
     signing_url: str
+
+
+class DeliverySettingsOut(BaseModel):
+    """Singleton delivery pricing (id=1). Maps API key is configured via env only."""
+
+    id: int = 1
+    enabled: bool
+    origin_address: str
+    price_per_mile: Decimal
+    minimum_fee: Decimal
+    free_miles: Decimal
+    max_delivery_miles: Decimal | None = None
+    google_maps_configured: bool = False
+
+
+class DeliverySettingsUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    enabled: bool | None = None
+    origin_address: str | None = Field(default=None, max_length=500)
+    price_per_mile: Decimal | None = Field(default=None, ge=0)
+    minimum_fee: Decimal | None = Field(default=None, ge=0)
+    free_miles: Decimal | None = Field(default=None, ge=0)
+    max_delivery_miles: Decimal | None = Field(default=None, ge=0)
 
 
 class ItemCreate(BaseModel):

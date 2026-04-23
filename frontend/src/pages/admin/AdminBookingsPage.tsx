@@ -3,7 +3,6 @@ import { adminDownloadBlob, adminGet, adminPost } from '../../api/client'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type {
   BookingRequestOut,
-  PaymentPath,
   ResendSignatureOut,
   StripeCheckoutSessionOut,
   StripeCheckoutSyncOut,
@@ -75,7 +74,6 @@ export function AdminBookingsPage() {
   const [declineForId, setDeclineForId] = useState<string | null>(null)
   const [declineReason, setDeclineReason] = useState('')
   const [declineError, setDeclineError] = useState<string | null>(null)
-  const [approvePathById, setApprovePathById] = useState<Record<string, PaymentPath>>({})
   /** Latest signing URLs from approve/resend (list GET does not echo the token). */
   const [signingUrlById, setSigningUrlById] = useState<Record<string, string>>({})
 
@@ -90,18 +88,13 @@ export function AdminBookingsPage() {
     load()
   }, [load])
 
-  function approvePathFor(id: string): PaymentPath {
-    return approvePathById[id] ?? 'card'
-  }
-
-  async function approve(id: string) {
+  async function approve(r: BookingRequestOut) {
     if (!adminApiReady) return
+    const id = r.id
     setBusyId(id)
     setError(null)
     try {
-      const out = await adminPost<BookingRequestOut>(`/admin/booking-requests/${id}/approve`, {
-        payment_path: approvePathFor(id),
-      })
+      const out = await adminPost<BookingRequestOut>(`/admin/booking-requests/${id}/approve`, {})
       if (out.signing_url) {
         setSigningUrlById((prev) => ({ ...prev, [id]: out.signing_url! }))
       }
@@ -337,6 +330,16 @@ export function AdminBookingsPage() {
                 <div className="muted small">{r.customer_address}</div>
               ) : null}
               {r.notes ? <div className="muted small">{r.notes}</div> : null}
+              <div className="muted small">
+                Customer payment preference:{' '}
+                <strong>{r.payment_method_preference ?? '—'}</strong>
+                {r.payment_path ? (
+                  <>
+                    {' '}
+                    · Approved payment path: <strong>{r.payment_path}</strong>
+                  </>
+                ) : null}
+              </div>
               {(r.status === 'rejected' || r.status === 'declined') && r.decline_reason ? (
                 <div className="small admin-decline-reason">
                   <strong>Decline reason:</strong> {r.decline_reason}
@@ -486,27 +489,11 @@ export function AdminBookingsPage() {
                 ) : null}
                 {canApprove ? (
                   <>
-                    <label className="inline-select muted small">
-                      Payment path{' '}
-                      <select
-                        value={approvePathFor(r.id)}
-                        onChange={(e) =>
-                          setApprovePathById((prev) => ({
-                            ...prev,
-                            [r.id]: e.target.value as PaymentPath,
-                          }))
-                        }
-                        aria-label={`Payment path for booking ${r.id}`}
-                      >
-                        <option value="card">Card</option>
-                        <option value="ach">ACH</option>
-                      </select>
-                    </label>
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
                       disabled={busyId === r.id}
-                      onClick={() => approve(r.id)}
+                      onClick={() => approve(r)}
                     >
                       {busyId === r.id ? '…' : 'Approve'}
                     </button>

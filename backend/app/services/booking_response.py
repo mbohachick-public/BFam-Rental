@@ -70,6 +70,13 @@ def booking_out_from_row(
         decline_email_sent=decline_email_sent,
         company_name=_str_opt(row.get("company_name")),
         delivery_address=_str_opt(row.get("delivery_address")),
+        delivery_requested=(
+            None
+            if row.get("delivery_requested") is None
+            else bool(row.get("delivery_requested"))
+        ),
+        delivery_fee=_dec(row.get("delivery_fee")),
+        delivery_distance_miles=_dec(row.get("delivery_distance_miles")),
         payment_method_preference=_str_opt(row.get("payment_method_preference")),
         is_repeat_contractor=row.get("is_repeat_contractor")
         if row.get("is_repeat_contractor") is not None

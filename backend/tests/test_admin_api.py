@@ -332,11 +332,13 @@ def test_admin_approve_mark_and_confirm_booking(
 
     g = client.get(f"/booking-actions/{token}/sign")
     assert g.status_code == 200
-    assert "agreement_html" in g.json()
+    gj = g.json()
+    assert "agreement_html" in gj
+    assert gj.get("customer_email") == "test@e2e.com"
+    assert gj.get("customer_first_name") == "Test"
 
     sign_body = {
         "signer_name": "Test User",
-        "signer_email": "test@e2e.com",
         "typed_signature": "Test User",
         "acknowledgments": {
             "rental_agreement": True,
@@ -552,3 +554,40 @@ def test_admin_cleanup_e2e_leaves_non_e2e_items(client, admin_headers, db_store)
     assert res.json()["items_deleted"] == 1
     assert len(db_store["items"]) == 1
     assert db_store["items"][0]["id"] == keep_id
+
+
+def test_admin_get_delivery_settings(client, admin_headers, fake_settings, db_store):
+    fake_settings.google_maps_api_key = "secret"
+    row = db_store["delivery_settings"][0]
+    row["enabled"] = True
+    row["origin_address"] = "1 Warehouse Rd"
+    row["price_per_mile"] = 1.5
+    row["minimum_fee"] = 25.0
+    row["free_miles"] = 5.0
+    row["max_delivery_miles"] = 40.0
+
+    res = client.get("/admin/delivery-settings", headers=admin_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["enabled"] is True
+    assert data["origin_address"] == "1 Warehouse Rd"
+    assert float(data["price_per_mile"]) == 1.5
+    assert float(data["minimum_fee"]) == 25.0
+    assert float(data["free_miles"]) == 5.0
+    assert float(data["max_delivery_miles"]) == 40.0
+    assert data["google_maps_configured"] is True
+
+
+def test_admin_patch_delivery_settings(client, admin_headers, db_store):
+    res = client.patch(
+        "/admin/delivery-settings",
+        json={"enabled": True, "origin_address": "9 Yard Ln", "price_per_mile": "2.25"},
+        headers=admin_headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["enabled"] is True
+    assert res.json()["origin_address"] == "9 Yard Ln"
+    row = db_store["delivery_settings"][0]
+    assert row["enabled"] is True
+    assert row["origin_address"] == "9 Yard Ln"
+    assert row["price_per_mile"] == 2.25

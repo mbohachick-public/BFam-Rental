@@ -18,6 +18,9 @@ export function AdminLayout() {
         <NavLink to="/admin/bookings" className="nav-link">
           Booking requests
         </NavLink>
+        <NavLink to="/admin/delivery-settings" className="nav-link">
+          Delivery
+        </NavLink>
       </nav>
       <Outlet />
     </div>

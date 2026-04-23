@@ -303,6 +303,22 @@ a:hover {
   cursor: not-allowed;
 }
 
+.btn.btn-loading:disabled {
+  opacity: 1;
+  cursor: wait;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-spinner {
+  flex-shrink: 0;
+  animation: btn-spin 0.7s linear infinite;
+}
+
 /* Explicit label + hover text so global `a:hover` does not make primary CTAs illegible */
 .btn.btn-primary,
 a.btn.btn-primary {
@@ -989,6 +1005,15 @@ select:focus {
   color: var(--color-text-primary);
 }
 
+.cal-pending_request {
+  background: linear-gradient(
+    135deg,
+    rgba(180, 140, 60, 0.35) 0%,
+    rgba(200, 160, 80, 0.45) 100%
+  );
+  border-color: rgba(160, 120, 50, 0.55);
+}
+
 .cal-open_for_booking {
   background: #bbf7d0;
   border-color: #86efac;
@@ -1226,4 +1251,46 @@ code {
 
 .admin-awaiting-signature {
   margin-top: 0.35rem;
+}
+
+.payment-steps-card .payment-step {
+  margin-top: 1.25rem;
+  padding: 1rem 1rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface, #fafafa);
+}
+
+.payment-steps-card .payment-step-active {
+  border-color: var(--color-brand-red, #b91c1c);
+  box-shadow: 0 0 0 1px rgba(185, 28, 28, 0.12);
+}
+
+.payment-steps-card .payment-step-wait {
+  opacity: 0.88;
+}
+
+.payment-steps-card .payment-step-done {
+  opacity: 0.92;
+}
+
+.payment-step-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  margin: 0 0 0.5rem;
+}
+
+.payment-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  background: var(--color-brand-red, #b91c1c);
+  color: #fff;
 }

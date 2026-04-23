@@ -29,6 +29,8 @@ def test_public_payment_status_ok(client, db_store, seed_item):
             "status": "approved_pending_payment",
             "rental_paid_at": None,
             "rental_payment_status": "unpaid",
+            "deposit_amount": 50.0,
+            "deposit_secured_at": None,
         }
     )
     r = client.get(f"/booking-requests/{bid}/payment-status")
@@ -37,6 +39,8 @@ def test_public_payment_status_ok(client, db_store, seed_item):
     assert body["booking_id"] == bid
     assert body["rental_paid"] is False
     assert body["item_title"]
+    assert body["deposit_secured"] is False
+    assert body["requires_deposit"] is True
 
 
 def test_stripe_webhook_marks_rental_paid_and_deposit_when_checkout_included_deposit(
@@ -351,6 +355,7 @@ def test_sign_complete_returns_stripe_checkout_url(client, db_store, seed_item):
     r = client.get(f"/booking-actions/{raw}/complete")
     assert r.status_code == 200
     j = r.json()
+    assert j["booking_id"] == bid
     assert j["stripe_checkout_url"] == "https://checkout.stripe.com/c/pay/test_complete"
     assert j["payment_path"] == "card"
     assert j["rental_balance_paid"] is False
@@ -565,7 +570,7 @@ def test_admin_stripe_checkout_rejects_non_card(client, admin_headers, db_store,
             "start_date": "2026-06-01",
             "end_date": "2026-06-02",
             "status": "approved_pending_payment",
-            "payment_path": "ach",
+            "payment_path": "legacy_non_card",
             "rental_total_with_tax": 50.0,
             "customer_email": "a@test.com",
         }

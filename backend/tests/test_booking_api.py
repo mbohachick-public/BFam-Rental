@@ -3,6 +3,7 @@
 import io
 import json
 from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 
@@ -49,7 +50,76 @@ def test_quote_returns_pricing(client, seed_item, seed_day_statuses):
     assert float(body["sales_tax_rate_percent"]) == 4.225
     assert float(body["sales_tax_amount"]) == 12.68
     assert float(body["rental_total_with_tax"]) == 312.68
-    assert "FALLBACK" in body["sales_tax_source"]
+    assert float(body.get("delivery_fee", 0)) == 0.0
+    assert body.get("delivery_distance_miles") in (None, 0, "0")
+
+
+def test_quote_with_delivery_adds_fee_and_tax_on_subtotal(
+    client, seed_item, seed_day_statuses, fake_settings, db_store, monkeypatch
+):
+    fake_settings.google_maps_api_key = "fake-key"
+    monkeypatch.setattr(
+        "app.services.delivery_pricing.fetch_road_distance_miles",
+        lambda *_a, **_k: Decimal("10.00"),
+    )
+    row = db_store["delivery_settings"][0]
+    row["enabled"] = True
+    row["origin_address"] = "100 Depot St, Kansas City, MO"
+    row["price_per_mile"] = 2.0
+    row["minimum_fee"] = 0.0
+    row["free_miles"] = 0.0
+    row["max_delivery_miles"] = 100.0
+
+    item = seed_item(cost_per_day=100.0, minimum_day_rental=1)
+    start, end = _future(5), _future(7)
+    seed_day_statuses(item["id"], [
+        (_future(5), "open_for_booking"),
+        (_future(6), "open_for_booking"),
+        (_future(7), "open_for_booking"),
+    ])
+
+    res = client.post(
+        "/booking-requests/quote",
+        json={
+            "item_id": item["id"],
+            "start_date": start,
+            "end_date": end,
+            "customer_email": "delquote@test.com",
+            "delivery_requested": True,
+            "delivery_address": "200 Main St, Kansas City, MO",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert float(body["delivery_fee"]) == 20.0
+    assert float(body["discounted_subtotal"]) == 300.0
+    assert abs(float(body["sales_tax_amount"]) - 13.52) < 0.02
+    assert abs(float(body["rental_total_with_tax"]) - 333.52) < 0.02
+
+
+def test_quote_delivery_unavailable_on_item_returns_400(client, seed_item, seed_day_statuses, db_store):
+    row = db_store["delivery_settings"][0]
+    row["enabled"] = True
+    row["origin_address"] = "100 Depot St, Kansas City, MO"
+    row["price_per_mile"] = 1.0
+
+    item = seed_item(cost_per_day=50.0, minimum_day_rental=1)
+    item["delivery_available"] = False
+    start, end = _future(5), _future(6)
+    seed_day_statuses(item["id"], [(start, "open_for_booking"), (end, "open_for_booking")])
+
+    res = client.post(
+        "/booking-requests/quote",
+        json={
+            "item_id": item["id"],
+            "start_date": start,
+            "end_date": end,
+            "customer_email": "x@test.com",
+            "delivery_requested": True,
+            "delivery_address": "200 Main St",
+        },
+    )
+    assert res.status_code == 400
 
 
 def test_quote_inactive_item_returns_404(client, seed_item):
@@ -145,8 +215,6 @@ def test_quote_falls_back_when_tax_url_non_json_but_fallback_set(
     assert res.status_code == 200
     body = res.json()
     assert float(body["sales_tax_rate_percent"]) == 5.0
-    assert "FALLBACK" in body["sales_tax_source"]
-    assert "JSONDecodeError" in body["sales_tax_source"] or "failed" in body["sales_tax_source"].lower()
 
 
 def test_quote_nonexistent_item_returns_404(client):
@@ -159,7 +227,7 @@ def test_quote_nonexistent_item_returns_404(client):
     assert res.status_code == 404
 
 
-def test_create_booking_success(client, seed_item, seed_day_statuses):
+def test_create_booking_success(client, seed_item, seed_day_statuses, db_store):
     item = seed_item(cost_per_day=50.0, towable=False)
     start, end = _future(5), _future(6)
     seed_day_statuses(item["id"], [
@@ -191,6 +259,46 @@ def test_create_booking_success(client, seed_item, seed_day_statuses):
     assert float(body["rental_total_with_tax"]) == float(body["discounted_subtotal"]) + float(
         body["sales_tax_amount"]
     )
+    held = [
+        r
+        for r in db_store["item_day_status"]
+        if r["item_id"] == item["id"] and r["day"] in (start, end)
+    ]
+    assert {r["status"] for r in held} == {"pending_request"}
+
+
+def test_create_booking_second_customer_same_dates_rejected(
+    client, seed_item, seed_day_statuses, db_store
+):
+    item = seed_item(cost_per_day=50.0, towable=False)
+    start, end = _future(12), _future(13)
+    seed_day_statuses(item["id"], [
+        (start, "open_for_booking"),
+        (end, "open_for_booking"),
+    ])
+    jpeg = _tiny_jpeg()
+    base = {
+        "item_id": item["id"],
+        "start_date": start,
+        "end_date": end,
+        "customer_phone": "5551234567",
+        "customer_first_name": "A",
+        "customer_last_name": "B",
+        "customer_address": "1 St",
+    }
+    r1 = client.post(
+        "/booking-requests",
+        data={**base, "customer_email": "first@test.com"},
+        files={"drivers_license": ("license.jpg", io.BytesIO(jpeg), "image/jpeg")},
+    )
+    assert r1.status_code == 201
+    r2 = client.post(
+        "/booking-requests",
+        data={**base, "customer_email": "second@test.com"},
+        files={"drivers_license": ("license2.jpg", io.BytesIO(jpeg), "image/jpeg")},
+    )
+    assert r2.status_code == 400
+    assert len([b for b in db_store["booking_requests"] if b["item_id"] == item["id"]]) == 1
 
 
 def test_create_booking_missing_license(client, seed_item, seed_day_statuses):
@@ -325,7 +433,9 @@ def test_create_booking_multipart_rejected_when_supabase_storage(
     assert "presign" in res.json()["detail"].lower()
 
 
-def test_presign_and_complete_non_towable(client, fake_client, fake_settings, seed_item, seed_day_statuses):
+def test_presign_and_complete_non_towable(
+    client, fake_client, fake_settings, seed_item, seed_day_statuses, db_store
+):
     fake_settings.booking_documents_storage = "supabase"
     item = seed_item(towable=False)
     start, end = _future(5), _future(6)
@@ -350,6 +460,12 @@ def test_presign_and_complete_non_towable(client, fake_client, fake_settings, se
     assert pre.status_code == 201
     pj = pre.json()
     bid = pj["booking_id"]
+    held = [
+        r
+        for r in db_store["item_day_status"]
+        if r["item_id"] == item["id"] and r["day"] in (start, end)
+    ]
+    assert {r["status"] for r in held} == {"pending_request"}
     dl_path = pj["drivers_license"]["path"]
     assert pj["license_plate"] is None
     fake_client.storage.upload(dl_path, jpeg, file_options={"content-type": "image/jpeg"})
@@ -417,3 +533,9 @@ def test_abandon_after_presign(client, fake_settings, db_store, seed_item, seed_
     r = client.delete(f"/booking-requests/{bid}/abandon")
     assert r.status_code == 204
     assert not any(str(rw.get("id")) == bid for rw in db_store.get("booking_requests", []))
+    reopened = [
+        rw
+        for rw in db_store["item_day_status"]
+        if rw["item_id"] == item["id"] and rw["day"] in (start, end)
+    ]
+    assert {rw["status"] for rw in reopened} == {"open_for_booking"}

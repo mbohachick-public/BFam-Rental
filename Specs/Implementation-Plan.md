@@ -78,11 +78,11 @@ flowchart LR
 
 - Creating an item via `POST /admin/items` **seeds** `item_day_status` for every day from **today through today + 60** (inclusive), each as `open_for_booking`, matching the customer booking window.
 - On **GET** `/items/{id}/availability`, **GET** `/admin/items/{id}/availability`, **GET** `/items` with `open_from` / `open_to`, and before **quote** / **booking** validation, the API **upserts any missing** days in that same window as `open_for_booking` so the rolling horizon stays filled as calendar time moves (existing statuses such as `booked` are not overwritten).
-- **Legacy databases:** uncomment and run **PART 5** in `Specs/supabase-setup.sql` once to backfill missing rows for items that predate seeding.
+- **Legacy databases:** uncomment and run **PART 4** in `Specs/supabase-setup.sql` once to backfill missing rows for items that predate seeding.
 
 **Data model (items)**
 
-- `items.active` (boolean, default `true`): when `false`, the item is hidden from customers; older databases can run **PART 2** in `Specs/supabase-setup.sql` to add the column idempotently.
+- `items.active` (boolean, default `true`): when `false`, the item is hidden from customers; fresh installs use **`Specs/supabase-setup.sql`** (PART 1).
 
 ## UI wireframes (summary)
 
@@ -135,10 +135,10 @@ Tables or equivalent concepts (names illustrative):
 
 ## Phase 1 — Booking approval & payment prep (Codex handoff)
 
-Product copy, lifecycle rules, and acceptance criteria live under **`Specs/payments-handoff/`** (see that folder’s `README.md`). Database changes for extended `booking_request_status` values, `booking_requests` workflow columns, `booking_events`, and `items.delivery_available` are split across **`Specs/supabase-migration-booking-workflow-phase1-step1-enum.sql`** then **`Specs/supabase-migration-booking-workflow-phase1-step2-schema.sql`** (two runs in the Supabase SQL editor; see **`Specs/supabase-migration-booking-workflow-phase1.sql`** for why). Run after backup.
+Product copy, lifecycle rules, and acceptance criteria live under **`Specs/payments-handoff/`** (see that folder’s `README.md`). Database changes for extended `booking_request_status` values, `booking_requests` workflow columns, `booking_events`, and `items.delivery_available` are defined in **`Specs/supabase-setup.sql`** (PART 0–1). **PART 0** drops existing BFam tables; run only when a full reset is acceptable.
 
 **API (implemented in Python):** new bookings use status **`requested`** (legacy **`pending`** is still accepted on reads and for abandon/complete). Admin **`POST /admin/booking-requests/{id}/approve`** chooses **`payment_path`** (`card` / `ach` / `business_check`) and moves the row to **`approved_awaiting_signature`**: the API creates HTML snapshots + a signing token, emails the customer a link to **`{FRONTEND_PUBLIC_URL}/booking-actions/{token}/sign`**, and returns **`signing_url`** for the admin UI. The customer **`POST /booking-actions/{token}/sign`** (no auth) records acknowledgments, sets **`agreement_signed_at`**, advances to **`approved_pending_payment`** or **`approved_pending_check_clearance`**, and generates an executed PDF. **`GET /booking-actions/{token}/complete`** is the post-sign confirmation page. Admin **`POST /admin/booking-requests/{id}/resend-signature`** re-emails the link. Calendar days are marked **`booked`** only on **`POST .../confirm`**, after rental payment, deposit, and agreement are satisfied (agreement is normally satisfied by signing, not **`mark-agreement-signed`**). Optional env **`PAYMENT_COLLECTION_URL_TEMPLATE`** may include `{booking_id}` to populate **`payment_collection_url`** on approve. Declines use status **`declined`** (legacy **`rejected`** rows unchanged).
 
 ## Contract signing (Codex bundle)
 
-Spec copy and field mapping: **`Specs/contract-signing/`** (see **`README.md`**). SQL: **`Specs/supabase-migration-contract-signing-step1-enum.sql`** then **`Specs/supabase-migration-contract-signing-step2-schema.sql`**. SPA routes: **`/booking-actions/:token/sign`** and **`/booking-actions/:token/complete`**.
+Spec copy and field mapping: **`Specs/contract-signing/`** (see **`README.md`**). SQL: **`Specs/supabase-setup.sql`** (includes contract-signing tables and enum values). SPA routes: **`/booking-actions/:token/sign`** and **`/booking-actions/:token/complete`**.

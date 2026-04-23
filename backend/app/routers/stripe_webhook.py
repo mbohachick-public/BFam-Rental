@@ -12,6 +12,7 @@ from supabase import Client
 
 from app.config import get_settings
 from app.deps import get_supabase_client
+from app.services.admin_notify import try_notify_admin_confirm_needed
 from app.services.booking_events import log_booking_event
 from app.services.stripe_checkout import _cents
 
@@ -182,6 +183,7 @@ def _handle_rental_checkout_completed(client: Client, session: dict) -> None:
         },
     )
     logger.info("stripe_webhook_rental_paid booking_id=%s", booking_id)
+    try_notify_admin_confirm_needed(client, get_settings(), booking_id)
 
 
 def _handle_deposit_checkout_completed(client: Client, session: dict) -> None:
@@ -249,6 +251,7 @@ def _handle_deposit_checkout_completed(client: Client, session: dict) -> None:
         booking_id,
         is_hold,
     )
+    try_notify_admin_confirm_needed(client, get_settings(), booking_id)
 
 
 def _handle_legacy_combined_checkout_completed(client: Client, session: dict) -> None:
@@ -301,6 +304,7 @@ def _handle_legacy_combined_checkout_completed(client: Client, session: dict) ->
         },
     )
     logger.info("stripe_webhook_legacy_combined_paid booking_id=%s", booking_id)
+    try_notify_admin_confirm_needed(client, get_settings(), booking_id)
 
 
 def _handle_checkout_session_completed(client: Client, session: dict) -> None:

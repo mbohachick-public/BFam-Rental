@@ -236,6 +236,8 @@ class CustomerContactProfile(BaseModel):
 class BookingRequestOut(BaseModel):
     id: str
     item_id: str
+    #: Set on GET /admin/booking-requests/{id} for display; omitted on list responses.
+    item_title: str | None = None
     start_date: date
     end_date: date
     status: BookingRequestStatus

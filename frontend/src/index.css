@@ -1132,10 +1132,29 @@ select:focus {
   grid-template-columns: 1fr;
 }
 
+.admin-booking-detail-link {
+  display: inline-block;
+  margin-top: 0.25rem;
+}
+
 @media (min-width: 768px) {
   .admin-booking-row {
     grid-template-columns: 1fr 1fr auto;
   }
+}
+
+.page-admin-booking-detail .admin-booking-detail-meta {
+  margin-bottom: 1rem;
+}
+
+.page-admin-booking-detail .muted-block {
+  border: 1px dashed var(--color-border);
+  background: var(--color-canvas);
+}
+
+.page-admin-booking-detail .muted-block h2 {
+  font-size: 1rem;
+  color: var(--color-text-muted);
 }
 
 .admin-login-card {

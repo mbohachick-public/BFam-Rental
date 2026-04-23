@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_use_tls: bool = True
+    # When set (with SMTP), the API emails this address when a booking needs admin approval or final confirmation.
+    admin_notification_email: str = ""
     # Optional Auth0: when both are set, POST /booking-requests and /booking-requests/quote require a valid Bearer access token (audience = API identifier).
     auth0_domain: str = ""
     # Optional: comma-separated extra Auth0 hostnames trusted for JWT iss + JWKS (e.g. default tenant

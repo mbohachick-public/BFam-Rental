@@ -377,6 +377,67 @@ def test_admin_approve_mark_and_confirm_booking(
     get_settings.cache_clear()
 
 
+def test_admin_get_booking_detail(client, admin_headers, seed_item, db_store):
+    item = seed_item(title="Test Trailer")
+    import uuid as _uuid
+
+    bid = str(_uuid.uuid4())
+    db_store["booking_requests"].append({
+        "id": bid,
+        "item_id": item["id"],
+        "start_date": "2026-06-01",
+        "end_date": "2026-06-03",
+        "status": "requested",
+        "customer_email": "detail@test.com",
+        "customer_phone": "5551112222",
+        "customer_first_name": "Pat",
+        "customer_last_name": "Customer",
+        "customer_address": "99 Oak St, City, ST 12345",
+        "notes": "Gate code 1234",
+        "company_name": "Patco LLC",
+        "delivery_requested": True,
+        "delivery_address": "100 Delivery Rd",
+        "delivery_fee": 45.0,
+        "delivery_distance_miles": 12.5,
+        "payment_method_preference": "card",
+        "is_repeat_contractor": False,
+        "tow_vehicle_year": 2020,
+        "tow_vehicle_make": "Ford",
+        "tow_vehicle_model": "F-150",
+        "tow_vehicle_tow_rating_lbs": 8000,
+        "has_brake_controller": True,
+        "request_not_confirmed_ack": True,
+        "base_amount": 100.0,
+        "discount_percent": 0.0,
+        "discounted_subtotal": 100.0,
+        "deposit_amount": 50.0,
+        "sales_tax_rate_percent": 4.225,
+        "sales_tax_amount": 4.23,
+        "rental_total_with_tax": 104.23,
+        "sales_tax_source": "fallback",
+        "drivers_license_path": None,
+        "license_plate_path": None,
+        "decline_reason": None,
+        "created_at": "2026-04-01T00:00:00",
+    })
+    res = client.get(f"/admin/booking-requests/{bid}", headers=admin_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["id"] == bid
+    assert data["item_title"] == "Test Trailer"
+    assert data["customer_email"] == "detail@test.com"
+    assert data["delivery_requested"] is True
+    assert data["tow_vehicle_make"] == "Ford"
+
+
+def test_admin_get_booking_detail_404(client, admin_headers):
+    res = client.get(
+        "/admin/booking-requests/00000000-0000-0000-0000-000000000099",
+        headers=admin_headers,
+    )
+    assert res.status_code == 404
+
+
 def test_admin_decline_booking(client, admin_headers, seed_item, seed_day_statuses, db_store):
     item = seed_item()
     start = (date.today() + timedelta(days=8)).isoformat()

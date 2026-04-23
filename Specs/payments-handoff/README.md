@@ -4,14 +4,7 @@ This folder contains the **Codex handoff** product and technical specs (copied f
 
 ## Apply database changes
 
-Run in the **Supabase SQL Editor** (after backup), **as two separate runs** (PostgreSQL cannot use new enum labels in the same transaction as `ADD VALUE`; see `55P04`):
-
-1. [`../supabase-migration-booking-workflow-phase1-step1-enum.sql`](../supabase-migration-booking-workflow-phase1-step1-enum.sql) — enum labels only; run and wait for success.
-2. [`../supabase-migration-booking-workflow-phase1-step2-schema.sql`](../supabase-migration-booking-workflow-phase1-step2-schema.sql) — `pending` → `requested`, new columns, `booking_events`.
-
-The file [`../supabase-migration-booking-workflow-phase1.sql`](../supabase-migration-booking-workflow-phase1.sql) is a short pointer to these two steps (do not rely on it as a single executable migration).
-
-Until both steps are applied, the API may fail when inserting `requested` or writing new columns.
+Run **[`../supabase-setup.sql`](../supabase-setup.sql)** in the Supabase SQL Editor. **PART 0** drops all BFam application tables and types; **PART 1** creates the full schema (including `booking_request_status` values, workflow columns, and `booking_events`). Until that script has been applied, the API may fail when inserting `requested` or writing new columns.
 
 ## Documents
 

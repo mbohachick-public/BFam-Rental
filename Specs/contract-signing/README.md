@@ -18,10 +18,7 @@ Source: `assets/bohachick-contract-signing-codex-bundle.zip` (copied here as `01
 
 ## Database
 
-Run **in order** (same enum transaction rule as payments migration):
-
-1. `Specs/supabase-migration-contract-signing-step1-enum.sql`
-2. `Specs/supabase-migration-contract-signing-step2-schema.sql`
+`booking_documents`, `booking_signatures`, `booking_action_tokens`, and the **`approved_awaiting_signature`** status are created by **`Specs/supabase-setup.sql`** (PART 1). **PART 0** drops existing BFam tables first (destructive).
 
 ## Configuration (backend)
 

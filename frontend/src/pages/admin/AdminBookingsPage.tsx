@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { adminDownloadBlob, adminGet, adminPost } from '../../api/client'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type {
@@ -319,6 +320,13 @@ export function AdminBookingsPage() {
                 <span className="muted">
                   {' '}
                   · {r.start_date} → {r.end_date}
+                </span>
+                <span className="admin-booking-detail-link">
+                  {' '}
+                  ·{' '}
+                  <Link to={`/admin/bookings/${r.id}`} className="nav-link">
+                    View full request
+                  </Link>
                 </span>
               </div>
               <div className="muted small">

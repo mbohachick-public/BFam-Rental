@@ -45,6 +45,7 @@ from app.services.item_images_storage import (
     try_delete_item_image_for_url,
 )
 from app.services.e2e_cleanup import cleanup_e2e_test_items
+from app.services.admin_notify import try_notify_admin_confirm_needed
 from app.services.booking_events import log_booking_event
 from app.services.contract_signing import create_signing_package, signing_url
 from app.services.delivery_pricing import load_delivery_settings_row
@@ -397,6 +398,27 @@ def admin_list_bookings(
     ]
 
 
+@router.get("/booking-requests/{request_id}", response_model=BookingRequestOut)
+def admin_get_booking(
+    request_id: str, client: Client = Depends(get_supabase_client)
+) -> BookingRequestOut:
+    res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking request not found")
+    out = booking_out_from_row(client, rows[0], sign_document_urls=True)
+    it_res = (
+        client.table("items")
+        .select("title")
+        .eq("id", out.item_id)
+        .limit(1)
+        .execute()
+    )
+    it_rows = it_res.data or []
+    title = str(it_rows[0]["title"]) if it_rows else None
+    return out.model_copy(update={"item_title": title})
+
+
 @router.get("/booking-requests/{request_id}/files/drivers-license")
 def admin_booking_drivers_license_file(
     request_id: str, client: Client = Depends(get_supabase_client)
@@ -448,13 +470,13 @@ def admin_approve_booking(
         )
     except Exception as exc:
         logger.exception(
-            "create_signing_package failed for booking %s (apply Specs/supabase-migration-contract-signing-*.sql if missing tables/enum)",
+            "create_signing_package failed for booking %s (apply Specs/supabase-setup.sql if missing tables/enum)",
             request_id,
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "Could not create signing package. Apply contract-signing SQL migrations "
+                "Could not create signing package. Run Specs/supabase-setup.sql "
                 f"(see Specs/contract-signing/README.md). ({exc})"
             ),
         ) from exc
@@ -650,6 +672,7 @@ def admin_refund_stripe_deposit(
 def admin_mark_rental_paid(
     request_id: str, client: Client = Depends(get_supabase_client)
 ) -> BookingRequestOut:
+    settings = get_settings()
     res = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
     rows = res.data or []
     if not rows:
@@ -665,6 +688,7 @@ def admin_mark_rental_paid(
     ).eq("id", request_id).execute()
     log_booking_event(client, booking_id=request_id, event_type="rental_paid_marked", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    try_notify_admin_confirm_needed(client, settings, request_id)
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 
@@ -685,6 +709,7 @@ def admin_mark_deposit_secured(
     client.table("booking_requests").update({"deposit_secured_at": _now_iso()}).eq("id", request_id).execute()
     log_booking_event(client, booking_id=request_id, event_type="deposit_secured_marked", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    try_notify_admin_confirm_needed(client, get_settings(), request_id)
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 
@@ -705,6 +730,7 @@ def admin_mark_agreement_signed(
     client.table("booking_requests").update({"agreement_signed_at": _now_iso()}).eq("id", request_id).execute()
     log_booking_event(client, booking_id=request_id, event_type="agreement_signed_marked", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    try_notify_admin_confirm_needed(client, get_settings(), request_id)
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 

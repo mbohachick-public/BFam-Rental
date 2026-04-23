@@ -47,6 +47,26 @@ def _send_message(settings: Settings, to_addr: str, subject: str, plain: str, ht
         smtp.send_message(msg)
 
 
+def try_send_email(
+    settings: Settings,
+    *,
+    to_addr: str,
+    subject: str,
+    plain: str,
+    html_body: str,
+) -> bool:
+    """Send one HTML+plain email; return False if SMTP is unset or send fails."""
+    if not smtp_configured(settings):
+        log.info("SMTP not configured; skip email to %s", to_addr)
+        return False
+    try:
+        _send_message(settings, to_addr.strip(), subject, plain, html_body)
+        return True
+    except Exception as e:
+        log.warning("Failed to send email to %s: %s", to_addr, e)
+        return False
+
+
 def send_quote_email(
     settings: Settings,
     *,

@@ -135,6 +135,8 @@ export interface BookingPresignResponse {
 export interface BookingRequestOut {
   id: string
   item_id: string
+  /** Populated on GET /admin/booking-requests/:id */
+  item_title?: string | null
   start_date: string
   end_date: string
   status: BookingRequestStatus

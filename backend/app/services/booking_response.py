@@ -47,6 +47,7 @@ def booking_out_from_row(
     return BookingRequestOut(
         id=row["id"],
         item_id=row["item_id"],
+        item_title=None,
         start_date=date.fromisoformat(str(row["start_date"])),
         end_date=date.fromisoformat(str(row["end_date"])),
         status=BookingRequestStatus(row["status"]),

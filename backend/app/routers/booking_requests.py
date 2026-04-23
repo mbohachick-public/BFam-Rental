@@ -44,6 +44,7 @@ from app.services.booking_storage import (
     save_booking_document,
     verify_booking_document_uploaded,
 )
+from app.services.admin_notify import try_notify_admin_approval_needed
 from app.services.booking_response import booking_out_from_row
 from app.services.dates import iter_days_inclusive
 from app.services.quote_email import send_quote_email
@@ -656,6 +657,7 @@ def complete_booking_uploads(
 
     res2 = client.table("booking_requests").select("*").eq("id", booking_id).limit(1).execute()
     final = res2.data[0]
+    try_notify_admin_approval_needed(client, settings, booking_id)
     return booking_out_from_row(client, final, sign_document_urls=False)
 
 
@@ -821,6 +823,7 @@ def create_booking_request(
 
     res2 = client.table("booking_requests").select("*").eq("id", bid).limit(1).execute()
     final = res2.data[0]
+    try_notify_admin_approval_needed(client, settings, str(bid))
     return booking_out_from_row(client, final, sign_document_urls=False)
 
 

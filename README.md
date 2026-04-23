@@ -4,7 +4,7 @@ Website for the trailer rental business.
 
 ## Preview locally
 
-1. **Supabase** — Run `Specs/supabase-setup.sql` in the SQL editor (see file header for parts; optional demo seed and backfill are commented there).
+1. **Supabase** — Run `Specs/supabase-setup.sql` in the SQL editor (PART 0 is destructive; see file header for parts and optional commented seed/backfill/wipe).
 2. **API** — In `backend/`, copy `.env.example` to `.env`, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, then:
 
    ```bash
@@ -19,7 +19,7 @@ Website for the trailer rental business.
 
    Open the URL Vite prints (usually http://localhost:5173). **Admin** requires Auth0 on both the SPA (`VITE_AUTH0_*`) and the API (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, plus admin allowlist env vars — see `backend/README.md`).
 
-4. **Contract signing (after admin approves)** — Run `Specs/supabase-migration-contract-signing-step1-enum.sql` then `...-step2-schema.sql` in Supabase (same two-step pattern as other enum migrations). Set **`FRONTEND_PUBLIC_URL`** on the API to the SPA origin (no trailing slash) so approval and resend emails link to `/booking-actions/{token}/sign`. See **`Specs/contract-signing/README.md`** and **`Specs/Implementation-Plan.md`** (contract signing section).
+4. **Contract signing** — Tables and enums are created by `Specs/supabase-setup.sql`. Set **`FRONTEND_PUBLIC_URL`** on the API to the SPA origin (no trailing slash) so approval and resend emails link to `/booking-actions/{token}/sign`. See **`Specs/contract-signing/README.md`** and **`Specs/Implementation-Plan.md`** (contract signing section).
 
 ### “Failed to fetch” or catalog errors in the browser
 

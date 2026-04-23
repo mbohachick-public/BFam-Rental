@@ -50,15 +50,17 @@ export function ItemDetailPage() {
   const [taxZip, setTaxZip] = useState('')
   const [notes, setNotes] = useState('')
   const [companyName, setCompanyName] = useState('')
-  const [paymentPreference, setPaymentPreference] = useState<'card' | 'ach'>('card')
   const [towYear, setTowYear] = useState('')
   const [towMake, setTowMake] = useState('')
   const [towModel, setTowModel] = useState('')
   const [towRating, setTowRating] = useState('')
   const [hasBrakeController, setHasBrakeController] = useState(false)
   const [requestAck, setRequestAck] = useState(false)
+  const [deliveryRequested, setDeliveryRequested] = useState(false)
+  const [deliveryAddress, setDeliveryAddress] = useState('')
   const [quote, setQuote] = useState<BookingQuote | null>(null)
   const [quoteError, setQuoteError] = useState<string | null>(null)
+  const [quoting, setQuoting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitOk, setSubmitOk] = useState<string | null>(null)
   const [driversLicenseFile, setDriversLicenseFile] = useState<File | null>(null)
@@ -79,13 +81,14 @@ export function ItemDetailPage() {
     setTaxZip('')
     setActiveImageIdx(0)
     setCompanyName('')
-    setPaymentPreference('card')
     setTowYear('')
     setTowMake('')
     setTowModel('')
     setTowRating('')
     setHasBrakeController(false)
     setRequestAck(false)
+    setDeliveryRequested(false)
+    setDeliveryAddress('')
   }, [id])
 
   useEffect(() => {
@@ -150,6 +153,14 @@ export function ItemDetailPage() {
     }
   }, [id, customerSignedIn])
 
+  useEffect(() => {
+    if (item && item.delivery_available === false) {
+      setDeliveryRequested(false)
+      setDeliveryAddress('')
+      setQuote(null)
+    }
+  }, [item])
+
   function shiftMonth(delta: number) {
     const d = new Date(calYear, calMonth - 1 + delta, 1)
     setCalYear(d.getFullYear())
@@ -166,8 +177,13 @@ export function ItemDetailPage() {
       setQuoteError('Email is required — we will send your quote there.')
       return
     }
+    if (item?.delivery_available && deliveryRequested && !deliveryAddress.trim()) {
+      setQuoteError('Enter a delivery address to include delivery on the quote.')
+      return
+    }
     setQuoteError(null)
     setQuote(null)
+    setQuoting(true)
     try {
       const zip = taxZip.trim()
       const q = await apiPost<BookingQuote>('/booking-requests/quote', {
@@ -176,10 +192,15 @@ export function ItemDetailPage() {
         end_date: endDate,
         customer_email: em,
         ...(zip ? { tax_postal_code: zip } : {}),
+        ...(item?.delivery_available && deliveryRequested
+          ? { delivery_requested: true, delivery_address: deliveryAddress.trim() }
+          : { delivery_requested: false }),
       })
       setQuote(q)
     } catch (e) {
       setQuoteError(e instanceof Error ? e.message : 'Quote failed')
+    } finally {
+      setQuoting(false)
     }
   }
 
@@ -214,6 +235,10 @@ export function ItemDetailPage() {
       setQuoteError('Please confirm that this is a booking request, not a guaranteed reservation.')
       return
     }
+    if (item.delivery_available && deliveryRequested && !deliveryAddress.trim()) {
+      setQuoteError('Delivery address is required when delivery is requested.')
+      return
+    }
     if (item.towable) {
       const y = parseInt(towYear, 10)
       if (!towYear.trim() || !Number.isFinite(y)) {
@@ -243,6 +268,10 @@ export function ItemDetailPage() {
       if (item.towable && licensePlateFile) {
         fd.append('license_plate', licensePlateFile)
       }
+      if (item.delivery_available && deliveryRequested) {
+        fd.append('delivery_requested', 'true')
+        fd.append('delivery_address', deliveryAddress.trim())
+      }
       await apiPostFormData('/booking-requests', fd)
     }
     try {
@@ -263,7 +292,6 @@ export function ItemDetailPage() {
         license_plate_content_type: lpType,
         request_not_confirmed_ack: true,
         company_name: companyName.trim() || undefined,
-        payment_method_preference: paymentPreference,
       }
       if (item.towable) {
         presignBody.tow_vehicle_year = parseInt(towYear, 10)
@@ -273,6 +301,10 @@ export function ItemDetailPage() {
           presignBody.tow_vehicle_tow_rating_lbs = parseInt(towRating, 10)
         }
         presignBody.has_brake_controller = hasBrakeController
+      }
+      if (item.delivery_available) {
+        presignBody.delivery_requested = deliveryRequested
+        presignBody.delivery_address = deliveryRequested ? deliveryAddress.trim() : undefined
       }
       try {
         const pre = await apiPost<BookingPresignResponse>('/booking-requests/presign', presignBody)
@@ -443,22 +475,29 @@ export function ItemDetailPage() {
         <p className="muted">
           Pick a range within the next 60 days, then upload your license (and plate if towable).
           All days must be open for booking.{' '}
-          <strong>Email is required</strong> — we email your quote when you click Get quote, and a
-          confirmation when you submit. License photo: JPEG, PNG, or WebP, max 10 MB.
+          <strong>Email is required</strong> — we email your quote when you click Get quote (SMTP must
+          be configured on the API). License photo: JPEG, PNG, or WebP, max 10 MB.
           {item.towable ? ' Towable rentals also require a photo of your tow vehicle’s license plate.' : ''}
         </p>
         <p className="muted small">
-          Payment preference is <strong>card</strong> or <strong>ACH</strong> — the rental team
-          will confirm how payment is completed after approval (often with secure online checkout
-          where applicable). Submitting this form is a <strong>request only</strong> — it does not
-          guarantee availability until the rental team approves dates, payment, deposit, and
-          agreement.
+          After approval, rental totals are usually paid with a <strong>secure card checkout</strong>{' '}
+          (and a separate deposit link when applicable). The rental team will confirm details.
+          Submitting this form is a <strong>request only</strong> — it does not guarantee availability
+          until the rental team approves dates, payment, deposit, and agreement.
         </p>
+        <form
+          className="booking-form"
+          autoComplete="on"
+          onSubmit={(e) => {
+            e.preventDefault()
+          }}
+        >
         <div className="booking-grid">
           <label className="field">
             <span className="field-label">Start date</span>
             <input
               type="date"
+              name="booking_start_date"
               value={startDate}
               onChange={(e) => {
                 setStartDate(e.target.value)
@@ -470,6 +509,7 @@ export function ItemDetailPage() {
             <span className="field-label">End date</span>
             <input
               type="date"
+              name="booking_end_date"
               value={endDate}
               onChange={(e) => {
                 setEndDate(e.target.value)
@@ -499,9 +539,10 @@ export function ItemDetailPage() {
             <span className="field-label">Email (required)</span>
             <input
               type="email"
+              name="customer_email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
+              autoComplete="section-booking email"
               required
             />
           </label>
@@ -509,8 +550,9 @@ export function ItemDetailPage() {
             <span className="field-label">ZIP for sales tax (optional)</span>
             <input
               type="text"
+              name="tax_postal_code"
               inputMode="numeric"
-              autoComplete="postal-code"
+              autoComplete="section-booking postal-code"
               maxLength={10}
               placeholder="e.g. 64089"
               value={taxZip}
@@ -524,9 +566,10 @@ export function ItemDetailPage() {
             <span className="field-label">Phone (required)</span>
             <input
               type="tel"
+              name="customer_phone"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              autoComplete="tel"
+              autoComplete="section-booking tel"
               inputMode="tel"
               required
             />
@@ -535,9 +578,11 @@ export function ItemDetailPage() {
             <span className="field-label">First name (required)</span>
             <input
               type="text"
+              name="customer_first_name"
+              id="booking-given-name"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
-              autoComplete="given-name"
+              autoComplete="section-booking given-name"
               required
             />
           </label>
@@ -545,9 +590,11 @@ export function ItemDetailPage() {
             <span className="field-label">Last name (required)</span>
             <input
               type="text"
+              name="customer_last_name"
+              id="booking-family-name"
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
-              autoComplete="family-name"
+              autoComplete="section-booking family-name"
               required
             />
           </label>
@@ -555,12 +602,44 @@ export function ItemDetailPage() {
             <span className="field-label">Address (required)</span>
             <input
               type="text"
+              name="customer_address"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              autoComplete="street-address"
+              autoComplete="section-booking street-address"
               required
             />
           </label>
+          {item.delivery_available ? (
+            <>
+              <label className="field field-checkbox field-span">
+                <input
+                  type="checkbox"
+                  checked={deliveryRequested}
+                  onChange={(e) => {
+                    setDeliveryRequested(e.target.checked)
+                    setQuote(null)
+                  }}
+                />
+                <span>Request delivery to this address (fee by road miles; shown in quote)</span>
+              </label>
+              {deliveryRequested ? (
+                <label className="field field-span">
+                  <span className="field-label">Delivery address</span>
+                  <input
+                    type="text"
+                    name="delivery_address"
+                    value={deliveryAddress}
+                    onChange={(e) => {
+                      setDeliveryAddress(e.target.value)
+                      setQuote(null)
+                    }}
+                    autoComplete="off"
+                    placeholder="Where the equipment should be delivered"
+                  />
+                </label>
+              ) : null}
+            </>
+          ) : null}
           <label className="field field-span">
             <span className="field-label">Notes (optional)</span>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
@@ -569,20 +648,11 @@ export function ItemDetailPage() {
             <span className="field-label">Company / contractor name (optional)</span>
             <input
               type="text"
+              name="customer_company"
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
-              autoComplete="organization"
+              autoComplete="section-booking organization"
             />
-          </label>
-          <label className="field">
-            <span className="field-label">Payment preference</span>
-            <select
-              value={paymentPreference}
-              onChange={(e) => setPaymentPreference(e.target.value as 'card' | 'ach')}
-            >
-              <option value="card">Card</option>
-              <option value="ach">ACH</option>
-            </select>
           </label>
           {item.towable ? (
             <>
@@ -640,14 +710,55 @@ export function ItemDetailPage() {
         {quoteError && <p className="error-msg">{quoteError}</p>}
         {submitOk && <p className="success-msg">{submitOk}</p>}
         <div className="booking-actions">
-          <button type="button" className="btn btn-secondary" onClick={getQuote}>
-            Get quote
+          <button
+            type="button"
+            className={`btn ${quoting ? 'btn-primary btn-loading' : 'btn-secondary'}`}
+            onClick={getQuote}
+            disabled={quoting}
+            aria-busy={quoting}
+          >
+            {quoting ? (
+              <>
+                <svg
+                  className="btn-spinner"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  aria-hidden={true}
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    opacity="0.25"
+                  />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeDasharray="48"
+                    strokeDashoffset="36"
+                  />
+                </svg>
+                Getting quote…
+              </>
+            ) : (
+              'Get quote'
+            )}
           </button>
           <button
             type="button"
             className="btn btn-primary"
             onClick={submitRequest}
             disabled={
+              quoting ||
               submitting ||
               !quote ||
               !driversLicenseFile ||
@@ -657,12 +768,14 @@ export function ItemDetailPage() {
               !firstName.trim() ||
               !lastName.trim() ||
               !address.trim() ||
-              !requestAck
+              !requestAck ||
+              (item.delivery_available && deliveryRequested && !deliveryAddress.trim())
             }
           >
-            {submitting ? 'Sending…' : 'Submit request'}
+            {submitting ? 'Sending…' : 'Submit Booking'}
           </button>
         </div>
+        </form>
         {quote && (
           <div className="quote card card-pad">
             <h3>Quote</h3>
@@ -683,6 +796,21 @@ export function ItemDetailPage() {
                 <span>Rental subtotal</span>
                 <span>{money(quote.discounted_subtotal)}</span>
               </li>
+              {quote.delivery_fee != null && Number(quote.delivery_fee) > 0 ? (
+                <li>
+                  <span>
+                    Delivery
+                    {quote.delivery_distance_miles != null &&
+                    quote.delivery_distance_miles !== '' ? (
+                      <span className="muted">
+                        {' '}
+                        (~{Number(quote.delivery_distance_miles)} mi one-way)
+                      </span>
+                    ) : null}
+                  </span>
+                  <span>{money(quote.delivery_fee)}</span>
+                </li>
+              ) : null}
               <li>
                 <span>
                   Sales tax ({Number(quote.sales_tax_rate_percent)}%)
@@ -698,9 +826,6 @@ export function ItemDetailPage() {
                 <span>{money(quote.deposit_amount)}</span>
               </li>
             </ul>
-            <p className="muted small" style={{ marginTop: '0.75rem' }}>
-              Tax source: {quote.sales_tax_source}
-            </p>
           </div>
         )}
       </section>

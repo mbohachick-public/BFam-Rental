@@ -20,7 +20,6 @@ export function BookingSignPage() {
   const [loading, setLoading] = useState(true)
   const [signerName, setSignerName] = useState('')
   const [companyName, setCompanyName] = useState('')
-  const [signerEmail, setSignerEmail] = useState('')
   const [typedSignature, setTypedSignature] = useState('')
   const [ackRental, setAckRental] = useState(false)
   const [ackDamage, setAckDamage] = useState(false)
@@ -50,6 +49,18 @@ export function BookingSignPage() {
     }
   }, [token])
 
+  useEffect(() => {
+    if (!data) return
+    const fn = (data.customer_first_name || '').trim()
+    const ln = (data.customer_last_name || '').trim()
+    if (fn || ln) {
+      setSignerName([fn, ln].filter(Boolean).join(' '))
+    }
+    if ((data.company_name || '').trim()) {
+      setCompanyName(data.company_name!.trim())
+    }
+  }, [data])
+
   const allAcknowledged = ackRental && ackDamage && ackResp && ackPay
 
   async function onSubmit(e: React.FormEvent) {
@@ -62,20 +73,21 @@ export function BookingSignPage() {
     setSubmitting(true)
     setError(null)
     try {
+      const body: Record<string, unknown> = {
+        signer_name: signerName.trim(),
+        typed_signature: typedSignature.trim(),
+        acknowledgments: {
+          rental_agreement: ackRental,
+          damage_fee_schedule: ackDamage,
+          responsibility_fees: ackResp,
+          payment_deposit_gate: ackPay,
+        },
+      }
+      const co = companyName.trim()
+      if (co) body.company_name = co
       const out = await apiPostPublic<BookingSignResultOut>(
         `/booking-actions/${encodeURIComponent(token)}/sign`,
-        {
-          signer_name: signerName.trim(),
-          company_name: companyName.trim() || undefined,
-          signer_email: signerEmail.trim(),
-          typed_signature: typedSignature.trim(),
-          acknowledgments: {
-            rental_agreement: ackRental,
-            damage_fee_schedule: ackDamage,
-            responsibility_fees: ackResp,
-            payment_deposit_gate: ackPay,
-          },
-        },
+        body,
       )
       if (out.next_url) {
         navigate(out.next_url)
@@ -107,6 +119,8 @@ export function BookingSignPage() {
       </div>
     )
   }
+
+  const emailOnFile = (data.customer_email || '').trim()
 
   return (
     <div className="container page-booking-sign">
@@ -142,6 +156,10 @@ export function BookingSignPage() {
             </div>
           ) : null}
           <div>
+            <dt>Email on file</dt>
+            <dd>{emailOnFile || '—'}</dd>
+          </div>
+          <div>
             <dt>Rental total (with tax)</dt>
             <dd>{money(data.rental_total_with_tax)}</dd>
           </div>
@@ -158,6 +176,17 @@ export function BookingSignPage() {
             <dd>{data.expires_at}</dd>
           </div>
         </dl>
+        {!emailOnFile ? (
+          <p className="error-msg small" style={{ marginTop: '0.75rem' }}>
+            This booking has no email on file. Contact {LEGAL_BUSINESS_NAME} before you can sign —
+            the API will not accept a signature without it.
+          </p>
+        ) : (
+          <p className="muted small" style={{ marginTop: '0.75rem' }}>
+            Your signature will be recorded using the email on file — you do not need to type it
+            again.
+          </p>
+        )}
       </section>
 
       <section className="card card-pad section-block contract-html-block">
@@ -204,10 +233,6 @@ export function BookingSignPage() {
             <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
           </label>
           <label className="field field-span">
-            <span className="field-label">Email address (must match booking)</span>
-            <input type="email" value={signerEmail} onChange={(e) => setSignerEmail(e.target.value)} required />
-          </label>
-          <label className="field field-span">
             <span className="field-label">Type your full name as your electronic signature</span>
             <input value={typedSignature} onChange={(e) => setTypedSignature(e.target.value)} required />
           </label>
@@ -222,7 +247,7 @@ export function BookingSignPage() {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={submitting || !allAcknowledged}
+              disabled={submitting || !allAcknowledged || !emailOnFile}
             >
               {submitting ? 'Submitting…' : 'Sign agreement'}
             </button>

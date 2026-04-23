@@ -70,6 +70,12 @@ def get_sign_page(token: str, client: Client = Depends(get_supabase_client)) -> 
             detail="This booking is not awaiting signature.",
         )
     b = payload["booking"]
+    def _str_opt(v: object | None) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
     return BookingSignPageOut(
         item_title=payload["item_title"],
         start_date=str(b.get("start_date") or ""),
@@ -78,6 +84,10 @@ def get_sign_page(token: str, client: Client = Depends(get_supabase_client)) -> 
         rental_total_with_tax=str(b.get("rental_total_with_tax") or "") or None,
         deposit_amount=str(b.get("deposit_amount") or "") or None,
         payment_path=str(b.get("payment_path") or "") or None,
+        customer_first_name=_str_opt(b.get("customer_first_name")),
+        customer_last_name=_str_opt(b.get("customer_last_name")),
+        customer_email=_str_opt(b.get("customer_email")),
+        company_name=_str_opt(b.get("company_name")),
         agreement_html=payload["agreement_html"],
         damage_html=payload["damage_html"],
         expires_at=str(tok.get("expires_at") or ""),
@@ -98,7 +108,7 @@ def post_sign_page(
         settings,
         raw_token=token,
         signer_name=body.signer_name,
-        signer_email=str(body.signer_email),
+        signer_email=body.signer_email,
         company_name=body.company_name,
         typed_signature=body.typed_signature,
         acknowledgments=body.acknowledgments.model_dump(),
@@ -116,6 +126,11 @@ def post_sign_page(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email must match the address on the booking request.",
+        )
+    if err == "email_required":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This booking has no email on file; contact the rental office to add one before signing.",
         )
     if err == "invalid_state":
         raise HTTPException(
@@ -191,6 +206,7 @@ def get_sign_complete(token: str, client: Client = Depends(get_supabase_client))
     return BookingSignCompleteOut(
         ok=True,
         message="Your signed rental agreement has been recorded. Complete payment and deposit steps to confirm your booking.",
+        booking_id=booking_id,
         booking_status=st,
         payment_path=payment_path,
         stripe_checkout_url=stripe_url,

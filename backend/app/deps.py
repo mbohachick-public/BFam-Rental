@@ -125,7 +125,12 @@ def require_admin(
             detail="Sign in required",
         )
     try:
-        claims = verify_auth0_access_token(raw, domain=domain, audience=audience)
+        claims = verify_auth0_access_token(
+            raw,
+            domain=domain,
+            audience=audience,
+            domain_aliases=settings.auth0_domain_aliases,
+        )
     except PyJWKClientConnectionError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -177,7 +182,12 @@ def customer_jwt_claims(
             detail="Sign in required",
         )
     try:
-        return verify_auth0_access_token(token, domain=domain, audience=audience)
+        return verify_auth0_access_token(
+            token,
+            domain=domain,
+            audience=audience,
+            domain_aliases=settings.auth0_domain_aliases,
+        )
     except PyJWKClientConnectionError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -225,7 +235,12 @@ def require_customer_jwt(
             detail="Sign in required",
         )
     try:
-        return verify_auth0_access_token(token, domain=domain, audience=audience)
+        return verify_auth0_access_token(
+            token,
+            domain=domain,
+            audience=audience,
+            domain_aliases=settings.auth0_domain_aliases,
+        )
     except PyJWKClientConnectionError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

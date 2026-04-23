@@ -4,6 +4,8 @@ import { apiGetPublic } from '../api/client'
 import { LEGAL_BUSINESS_NAME } from '../branding'
 import type { BookingSignCompleteOut } from '../types'
 
+const SIGN_TOKEN_KEY = (bookingId: string) => `bfam_sign_token:${bookingId}`
+
 export function BookingSignCompletePage() {
   const { token } = useParams<{ token: string }>()
   const [data, setData] = useState<BookingSignCompleteOut | null>(null)
@@ -28,6 +30,15 @@ export function BookingSignCompletePage() {
       cancelled = true
     }
   }, [token])
+
+  useEffect(() => {
+    if (!token || !data?.booking_id) return
+    try {
+      sessionStorage.setItem(SIGN_TOKEN_KEY(data.booking_id), token)
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [token, data?.booking_id])
 
   if (error) {
     return (
@@ -54,6 +65,11 @@ export function BookingSignCompletePage() {
   const showRentalPay =
     Boolean(rentalUrl) && !data.rental_balance_paid && pendingCard
   const showDepositPay = Boolean(depositUrl) && !data.deposit_secured && pendingCard
+  const rentalDone = data.rental_balance_paid
+  const depositDone = data.deposit_secured
+  const bothStripeSteps = showRentalPay && showDepositPay
+  const rentalIsNext = showRentalPay && (!bothStripeSteps || !rentalDone)
+  const depositIsNext = showDepositPay && (!bothStripeSteps || rentalDone)
 
   const waitingForRentalLink = pendingCard && !data.rental_balance_paid && !rentalUrl
 
@@ -66,34 +82,74 @@ export function BookingSignCompletePage() {
           Current status: <strong>{data.booking_status}</strong>
         </p>
       ) : null}
-      {showRentalPay ? (
-        <section className="card card-pad section-block" style={{ marginTop: '1rem' }}>
-          <h2 className="h3">1) Pay rental balance</h2>
-          <p className="muted">
-            This secure checkout is only for the <strong>rental total (with tax)</strong> — not the
-            security deposit.
+
+      {pendingCard && (showRentalPay || showDepositPay) ? (
+        <section className="card card-pad section-block payment-steps-card" style={{ marginTop: '1rem' }}>
+          <h2 className="h3">Pay online (card)</h2>
+          <p className="muted small">
+            Complete each step below in order. You will use separate Stripe checkouts for the rental
+            total and the security deposit (hold).
           </p>
-          <p>
-            <a className="btn btn-primary" href={rentalUrl} target="_blank" rel="noreferrer">
-              Open rental payment (Stripe)
-            </a>
-          </p>
+
+          {showRentalPay ? (
+            <div
+              className={`payment-step ${rentalIsNext ? 'payment-step-active' : 'payment-step-done'}`}
+            >
+              <h3 className="payment-step-title">
+                <span className="payment-step-num">1</span>
+                {rentalDone ? 'Rental total — paid' : 'Rental total (with tax)'}
+              </h3>
+              {!rentalDone ? (
+                <>
+                  <p className="muted small">
+                    This checkout is only for the <strong>rental total (with tax)</strong>, not the
+                    deposit.
+                  </p>
+                  <p>
+                    <a className="btn btn-primary" href={rentalUrl}>
+                      Pay rental total (Stripe)
+                    </a>
+                  </p>
+                </>
+              ) : (
+                <p className="muted small">Recorded — continue to the deposit if required.</p>
+              )}
+            </div>
+          ) : null}
+
+          {showDepositPay ? (
+            <div
+              className={`payment-step ${depositIsNext && (rentalDone || !showRentalPay) ? 'payment-step-active' : ''} ${bothStripeSteps && !rentalDone ? 'payment-step-wait' : ''} ${depositDone ? 'payment-step-done' : ''}`}
+            >
+              <h3 className="payment-step-title">
+                <span className="payment-step-num">{showRentalPay ? '2' : '1'}</span>
+                {depositDone ? 'Security deposit — secured' : 'Security deposit (card hold)'}
+              </h3>
+              {bothStripeSteps && !rentalDone ? (
+                <p className="muted small">
+                  <strong>Next:</strong> complete step 1 first, then return to this page (bookmark it
+                  or use the link from your Stripe receipt page).
+                </p>
+              ) : !depositDone ? (
+                <>
+                  <p className="muted small">
+                    Separate checkout for the <strong>refundable security deposit</strong> (authorization
+                    hold unless {LEGAL_BUSINESS_NAME} tells you otherwise).
+                  </p>
+                  <p>
+                    <a className="btn btn-primary" href={depositUrl}>
+                      Place deposit hold (Stripe)
+                    </a>
+                  </p>
+                </>
+              ) : (
+                <p className="muted small">Deposit hold recorded.</p>
+              )}
+            </div>
+          ) : null}
         </section>
       ) : null}
-      {showDepositPay ? (
-        <section className="card card-pad section-block" style={{ marginTop: '1rem' }}>
-          <h2 className="h3">2) Pay security deposit</h2>
-          <p className="muted">
-            Separate checkout for the <strong>refundable security deposit</strong>. Complete this
-            after or before the rental payment unless {LEGAL_BUSINESS_NAME} tells you otherwise.
-          </p>
-          <p>
-            <a className="btn btn-primary" href={depositUrl} target="_blank" rel="noreferrer">
-              Open deposit payment (Stripe)
-            </a>
-          </p>
-        </section>
-      ) : null}
+
       {(showRentalPay || showDepositPay) && (
         <p className="muted small" style={{ marginTop: '1rem' }}>
           Signed in with the same email as this booking? Open{' '}

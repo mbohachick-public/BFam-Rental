@@ -3,6 +3,7 @@ export type DayStatus =
   | 'booked'
   | 'open_for_booking'
   | 'readying_for_use'
+  | 'pending_request'
 
 export type BookingRequestStatus =
   | 'pending'
@@ -22,7 +23,8 @@ export type BookingRequestStatus =
   | 'accepted'
   | 'rejected'
 
-export type PaymentPath = 'card' | 'ach' | 'business_check'
+/** Stored on bookings after approve; product uses card (Stripe) only. */
+export type PaymentPath = 'card'
 
 export interface ItemImage {
   id: string
@@ -68,11 +70,24 @@ export interface BookingQuote {
   discount_percent: string
   discounted_subtotal: string
   deposit_amount: string
+  delivery_fee?: string
+  delivery_distance_miles?: string | null
   sales_tax_rate_percent: string
   sales_tax_amount: string
   rental_total_with_tax: string
-  sales_tax_source: string
   email_sent?: boolean
+}
+
+/** GET/PATCH /admin/delivery-settings */
+export interface DeliverySettingsOut {
+  id: number
+  enabled: boolean
+  origin_address: string
+  price_per_mile: string
+  minimum_fee: string
+  free_miles: string
+  max_delivery_miles?: string | null
+  google_maps_configured: boolean
 }
 
 /** GET /booking-requests/mine — customer Auth0 only */
@@ -143,6 +158,9 @@ export interface BookingRequestOut {
   license_plate_url?: string | null
   company_name?: string | null
   delivery_address?: string | null
+  delivery_requested?: boolean | null
+  delivery_fee?: string | null
+  delivery_distance_miles?: string | null
   payment_method_preference?: string | null
   is_repeat_contractor?: boolean | null
   tow_vehicle_year?: number | null
@@ -202,6 +220,8 @@ export interface BookingPaymentStatusPublic {
   rental_paid: boolean
   rental_payment_status?: string | null
   item_title: string
+  deposit_secured?: boolean
+  requires_deposit?: boolean
 }
 
 export interface BookingSignPageOut {
@@ -212,6 +232,10 @@ export interface BookingSignPageOut {
   rental_total_with_tax?: string | null
   deposit_amount?: string | null
   payment_path?: string | null
+  customer_first_name?: string | null
+  customer_last_name?: string | null
+  customer_email?: string | null
+  company_name?: string | null
   agreement_html: string
   damage_html: string
   expires_at: string
@@ -230,6 +254,7 @@ export interface ResendSignatureOut {
 export interface BookingSignCompleteOut {
   ok: boolean
   message: string
+  booking_id: string
   booking_status?: string | null
   payment_path?: string | null
   stripe_checkout_url?: string | null

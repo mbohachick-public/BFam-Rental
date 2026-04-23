@@ -193,7 +193,7 @@ def complete_customer_signature(
     *,
     raw_token: str,
     signer_name: str,
-    signer_email: str,
+    signer_email: str | None,
     company_name: str | None,
     typed_signature: str,
     acknowledgments: dict[str, bool],
@@ -212,8 +212,19 @@ def complete_customer_signature(
         return {"error": "invalid_state"}
     booking = payload["booking"]
     expected_email = str(booking.get("customer_email") or "").strip().lower()
-    if expected_email and signer_email.strip().lower() != expected_email:
-        return {"error": "email_mismatch"}
+    provided_raw = (signer_email or "").strip()
+    provided_lower = provided_raw.lower()
+    if expected_email:
+        if not provided_lower:
+            email_for_record = str(booking.get("customer_email") or "").strip()
+        elif provided_lower != expected_email:
+            return {"error": "email_mismatch"}
+        else:
+            email_for_record = provided_raw
+    else:
+        if not provided_lower:
+            return {"error": "email_required"}
+        email_for_record = provided_raw
 
     existing = (
         client.table("booking_signatures").select("id").eq("booking_id", booking_id).execute().data
@@ -223,18 +234,14 @@ def complete_customer_signature(
         return {"error": "already_signed"}
 
     now = datetime.now(timezone.utc).isoformat()
-    next_status = (
-        BookingRequestStatus.approved_pending_check_clearance.value
-        if str(booking.get("payment_path") or "") == PaymentPath.business_check.value
-        else BookingRequestStatus.approved_pending_payment.value
-    )
+    next_status = BookingRequestStatus.approved_pending_payment.value
     sig_ins = (
         client.table("booking_signatures")
         .insert(
             {
                 "booking_id": booking_id,
                 "signer_name": signer_name.strip(),
-                "signer_email": signer_email.strip(),
+                "signer_email": email_for_record,
                 "company_name": (company_name or "").strip() or None,
                 "typed_signature": typed_signature.strip(),
                 "signed_at": now,
@@ -268,7 +275,7 @@ def complete_customer_signature(
         damage_html=payload["damage_html"],
         signature_block={
             "signer_name": signer_name.strip(),
-            "signer_email": signer_email.strip(),
+            "signer_email": email_for_record,
             "company_name": (company_name or "").strip() or None,
             "typed_signature": typed_signature.strip(),
             "signed_at": now,
@@ -304,7 +311,7 @@ def complete_customer_signature(
         booking_id=booking_id,
         event_type="customer_signed",
         actor_type="customer",
-        metadata={"signer_email": signer_email.strip()},
+        metadata={"signer_email": email_for_record},
     )
     return {
         "ok": True,

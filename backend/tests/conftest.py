@@ -318,7 +318,25 @@ def _make_fake_settings():
     s.stripe_webhook_secret = ""
     s.stripe_checkout_include_deposit = True
     s.public_app_base_url = MagicMock(return_value="http://localhost:5173")
+    s.google_maps_api_key = ""
+    s.google_maps_http_timeout_sec = 12.0
     return s
+
+
+@pytest.fixture(autouse=True)
+def _seed_delivery_settings_table(db_store):
+    """Singleton row so admin PATCH and load_delivery_settings hit the fake DB."""
+    db_store["delivery_settings"] = [
+        {
+            "id": 1,
+            "enabled": False,
+            "origin_address": "",
+            "price_per_mile": 0.0,
+            "minimum_fee": 0.0,
+            "free_miles": 0.0,
+            "max_delivery_miles": None,
+        }
+    ]
 
 
 @pytest.fixture()
@@ -362,7 +380,7 @@ def admin_headers(fake_settings, monkeypatch) -> dict[str, str]:
     fake_settings.auth0_admin_emails = ""
     fake_settings.auth0_admin_subs = ""
 
-    def _verify(_token: str, *, domain: str, audience: str) -> dict:
+    def _verify(_token: str, *, domain: str, audience: str, domain_aliases: str = "") -> dict:
         return {"sub": "auth0|pytest-admin", "permissions": ["admin"]}
 
     monkeypatch.setattr("app.deps.verify_auth0_access_token", _verify)

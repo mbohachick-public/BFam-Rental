@@ -7,6 +7,7 @@ import type { DayAvailability, DayStatus, ItemDetail } from '../../types'
 
 const STATUSES: DayStatus[] = [
   'open_for_booking',
+  'pending_request',
   'booked',
   'out_for_use',
   'readying_for_use',

@@ -26,7 +26,8 @@ create type public.day_status as enum (
   'out_for_use',
   'booked',
   'open_for_booking',
-  'readying_for_use'
+  'readying_for_use',
+  'pending_request'
 );
 
 create type public.booking_request_status as enum (

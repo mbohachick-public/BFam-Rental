@@ -24,6 +24,7 @@ from app.schemas import (
     DayStatus,
 )
 from app.services.booking import compute_rental_amounts, validate_booking_dates
+from app.services.delivery_pricing import compute_delivery_charge
 from app.services.sales_tax import (
     compute_sales_tax_amount,
     lookup_sales_tax_rate_percent,
@@ -45,9 +46,31 @@ from app.services.booking_storage import (
 )
 from app.services.booking_response import booking_out_from_row
 from app.services.dates import iter_days_inclusive
-from app.services.quote_email import send_booking_received_email, send_quote_email
+from app.services.quote_email import send_quote_email
 
 router = APIRouter(prefix="/booking-requests", tags=["booking-requests"])
+
+
+def _upsert_booking_date_hold(client: Client, item_id: str, start_date: date, end_date: date) -> None:
+    """Reserve item dates when a booking row is created; cleared on abandon/decline or set to booked on confirm."""
+    days = iter_days_inclusive(start_date, end_date)
+    rows = [
+        {"item_id": item_id, "day": d.isoformat(), "status": DayStatus.pending_request.value}
+        for d in days
+    ]
+    if rows:
+        client.table("item_day_status").upsert(rows).execute()
+
+
+def _release_booking_date_hold(client: Client, item_id: str, start_date: date, end_date: date) -> None:
+    """Re-open days when a draft booking is deleted before admin confirmation."""
+    days = iter_days_inclusive(start_date, end_date)
+    rows = [
+        {"item_id": item_id, "day": d.isoformat(), "status": DayStatus.open_for_booking.value}
+        for d in days
+    ]
+    if rows:
+        client.table("item_day_status").upsert(rows).execute()
 
 
 def _decimal(v: object) -> Decimal:
@@ -134,7 +157,7 @@ def _multipart_workflow_defaults() -> dict:
 def _workflow_from_presign(body: BookingPresignRequest) -> dict:
     return {
         "company_name": (body.company_name or "").strip() or None,
-        "payment_method_preference": body.payment_method_preference.value,
+        "payment_method_preference": "card",
         "is_repeat_contractor": body.is_repeat_contractor,
         "tow_vehicle_year": body.tow_vehicle_year,
         "tow_vehicle_make": (body.tow_vehicle_make or "").strip() or None,
@@ -169,6 +192,9 @@ def _validated_booking_insert_row(
     end_date: date,
     contact: BookingContactForm,
     notes: str | None,
+    *,
+    delivery_requested: bool = False,
+    delivery_address: str | None = None,
 ) -> tuple[dict, str, bool, int, Decimal, Decimal, Decimal, Decimal, Decimal, str, Decimal]:
     """
     Validate item/dates/contact/tax and build the insert dict (no document paths).
@@ -178,7 +204,9 @@ def _validated_booking_insert_row(
     clean_notes = (notes or "").strip() or None
     item_res = (
         client.table("items")
-        .select("id,cost_per_day,minimum_day_rental,deposit_amount,towable,title,active")
+        .select(
+            "id,cost_per_day,minimum_day_rental,deposit_amount,towable,title,active,delivery_available"
+        )
         .eq("id", item_id)
         .limit(1)
         .execute()
@@ -219,9 +247,20 @@ def _validated_booking_insert_row(
 
     num_days = len(days)
     base, disc_pct, disc_sub, dep = compute_rental_amounts(cost, num_days, deposit)
+    try:
+        delivery_fee, delivery_miles = compute_delivery_charge(
+            client,
+            settings,
+            item_delivery_available=bool(item.get("delivery_available", True)),
+            delivery_requested=delivery_requested,
+            delivery_address=delivery_address,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    taxable_subtotal = disc_sub + delivery_fee
     tax_rate, tax_amt, rental_w_tax, tax_src = _sales_tax_or_http(
         settings,
-        disc_sub,
+        taxable_subtotal,
         tax_postal_code=None,
         customer_address=contact.customer_address,
     )
@@ -250,6 +289,12 @@ def _validated_booking_insert_row(
         "sales_tax_amount": float(tax_amt),
         "rental_total_with_tax": float(rental_w_tax),
         "sales_tax_source": tax_src,
+        "delivery_requested": delivery_requested,
+        "delivery_address": ((delivery_address or "").strip() or None)
+        if delivery_requested
+        else None,
+        "delivery_fee": float(delivery_fee),
+        "delivery_distance_miles": float(delivery_miles) if delivery_miles is not None else None,
     }
     if auth_sub:
         insert_row["customer_auth0_sub"] = auth_sub
@@ -388,7 +433,7 @@ def public_booking_payment_status(booking_id: str, client: Client = Depends(get_
     """Post-Stripe thank-you page: minimal booking state (no auth; UUID is the secret)."""
     res = (
         client.table("booking_requests")
-        .select("id,status,rental_paid_at,rental_payment_status,item_id")
+        .select("id,status,rental_paid_at,rental_payment_status,item_id,deposit_secured_at,deposit_amount")
         .eq("id", booking_id)
         .limit(1)
         .execute()
@@ -409,12 +454,20 @@ def public_booking_payment_status(booking_id: str, client: Client = Depends(get_
     item_title = str(item_res[0].get("title") or "Rental") if item_res else "Rental"
     paid = bool(row.get("rental_paid_at"))
     rps = row.get("rental_payment_status")
+    dep_secured = bool(row.get("deposit_secured_at"))
+    dep_raw = row.get("deposit_amount")
+    try:
+        requires_deposit = dep_raw is not None and float(dep_raw) > 0
+    except (TypeError, ValueError):
+        requires_deposit = False
     return BookingPaymentStatusPublic(
         booking_id=str(row["id"]),
         status=str(row.get("status") or ""),
         rental_paid=paid,
         rental_payment_status=str(rps).strip() if rps is not None else None,
         item_title=item_title,
+        deposit_secured=dep_secured,
+        requires_deposit=requires_deposit,
     )
 
 
@@ -473,6 +526,8 @@ def presign_booking_uploads(
             body.end_date,
             contact,
             body.notes,
+            delivery_requested=body.delivery_requested,
+            delivery_address=body.delivery_address,
         )
     )
     insert_row.update(_workflow_from_presign(body))
@@ -494,6 +549,7 @@ def presign_booking_uploads(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Insert failed")
     row = data[0]
     bid = str(row["id"])
+    _upsert_booking_date_hold(client, body.item_id, body.start_date, body.end_date)
 
     dl_ext = ext_for_content_type(dl_type)
     path_dl = f"{bid}/drivers_license{dl_ext}"
@@ -512,6 +568,7 @@ def presign_booking_uploads(
             client.table("booking_requests").delete().eq("id", bid).execute()
         except Exception:
             pass
+        _release_booking_date_hold(client, body.item_id, body.start_date, body.end_date)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not create signed upload URLs. Check Supabase Storage configuration.",
@@ -564,14 +621,13 @@ def complete_booking_uploads(
 
     item_res = (
         client.table("items")
-        .select("title,towable")
+        .select("towable")
         .eq("id", row["item_id"])
         .limit(1)
         .execute()
     )
     it_rows = item_res.data or []
     towable = bool(it_rows[0].get("towable")) if it_rows else False
-    item_title = str(it_rows[0].get("title") or "Rental item") if it_rows else "Rental item"
 
     path_lp: str | None = None
     try:
@@ -600,30 +656,6 @@ def complete_booking_uploads(
 
     res2 = client.table("booking_requests").select("*").eq("id", booking_id).limit(1).execute()
     final = res2.data[0]
-    start_d = date.fromisoformat(str(final["start_date"]))
-    end_d = date.fromisoformat(str(final["end_date"]))
-    num_days = len(iter_days_inclusive(start_d, end_d))
-    disc_sub = _decimal(final["discounted_subtotal"])
-    tax_rate = _decimal(final["sales_tax_rate_percent"])
-    tax_amt = _decimal(final["sales_tax_amount"])
-    rental_w_tax = _decimal(final["rental_total_with_tax"])
-    tax_src = str(final.get("sales_tax_source") or "")
-    dep = _decimal(final["deposit_amount"])
-
-    send_booking_received_email(
-        settings,
-        to_addr=str(final.get("customer_email") or ""),
-        item_title=item_title,
-        start_date=start_d.isoformat(),
-        end_date=end_d.isoformat(),
-        num_days=num_days,
-        discounted_subtotal=disc_sub,
-        sales_tax_rate_percent=tax_rate,
-        sales_tax_amount=tax_amt,
-        rental_total_with_tax=rental_w_tax,
-        sales_tax_source=tax_src,
-        deposit_amount=dep,
-    )
     return booking_out_from_row(client, final, sign_document_urls=False)
 
 
@@ -636,7 +668,7 @@ def abandon_booking_upload(
     settings = get_settings()
     res = (
         client.table("booking_requests")
-        .select("id,status,drivers_license_path,license_plate_path")
+        .select("id,status,item_id,start_date,end_date,drivers_license_path,license_plate_path")
         .eq("id", booking_id)
         .limit(1)
         .execute()
@@ -657,7 +689,11 @@ def abandon_booking_upload(
             detail="Booking already has documents attached.",
         )
     remove_booking_storage_prefix(settings, client, booking_id)
+    item_id = str(row["item_id"])
+    start = date.fromisoformat(str(row["start_date"]))
+    end = date.fromisoformat(str(row["end_date"]))
     client.table("booking_requests").delete().eq("id", booking_id).execute()
+    _release_booking_date_hold(client, item_id, start, end)
 
 
 @router.post("", response_model=BookingRequestOut, status_code=status.HTTP_201_CREATED)
@@ -672,6 +708,8 @@ def create_booking_request(
     customer_last_name: str = Form(),
     customer_address: str = Form(),
     notes: str | None = Form(None),
+    delivery_requested: str | None = Form(default=None),
+    delivery_address: str | None = Form(None),
     drivers_license: UploadFile = File(),
     license_plate: UploadFile | None = File(default=None),
     client: Client = Depends(get_supabase_client),
@@ -705,20 +743,26 @@ def create_booking_request(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A driver's license image is required.",
         )
-
-    insert_row, item_title, towable, num_days, disc_sub, tax_rate, tax_amt, rental_w_tax, tax_src, dep = (
-        _validated_booking_insert_row(
-            client,
-            settings,
-            customer,
-            item_id,
-            start_date,
-            end_date,
-            contact,
-            notes,
+    dr_raw = str(delivery_requested or "").strip().lower()
+    delivery_requested_bool = dr_raw in ("1", "true", "on", "yes")
+    if delivery_requested_bool and not (delivery_address or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="delivery_address is required when delivery is requested.",
         )
-    )
 
+    insert_row, item_title, towable, *_ = _validated_booking_insert_row(
+        client,
+        settings,
+        customer,
+        item_id,
+        start_date,
+        end_date,
+        contact,
+        notes,
+        delivery_requested=delivery_requested_bool,
+        delivery_address=delivery_address,
+    )
     lp_has_file = bool(license_plate and license_plate.filename)
     if towable and not lp_has_file:
         raise HTTPException(
@@ -737,6 +781,7 @@ def create_booking_request(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Insert failed")
     row = data[0]
     bid = row["id"]
+    _upsert_booking_date_hold(client, item_id, start_date, end_date)
 
     try:
         dl_raw, dl_ct = _read_upload(drivers_license)
@@ -764,9 +809,11 @@ def create_booking_request(
         ).eq("id", bid).execute()
     except HTTPException:
         client.table("booking_requests").delete().eq("id", bid).execute()
+        _release_booking_date_hold(client, item_id, start_date, end_date)
         raise
     except Exception as exc:
         client.table("booking_requests").delete().eq("id", bid).execute()
+        _release_booking_date_hold(client, item_id, start_date, end_date)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=_booking_store_error_detail(settings),
@@ -774,20 +821,6 @@ def create_booking_request(
 
     res2 = client.table("booking_requests").select("*").eq("id", bid).limit(1).execute()
     final = res2.data[0]
-    send_booking_received_email(
-        settings,
-        to_addr=str(contact.customer_email),
-        item_title=item_title,
-        start_date=start_date.isoformat(),
-        end_date=end_date.isoformat(),
-        num_days=num_days,
-        discounted_subtotal=disc_sub,
-        sales_tax_rate_percent=tax_rate,
-        sales_tax_amount=tax_amt,
-        rental_total_with_tax=rental_w_tax,
-        sales_tax_source=tax_src,
-        deposit_amount=dep,
-    )
     return booking_out_from_row(client, final, sign_document_urls=False)
 
 
@@ -801,7 +834,7 @@ def quote_booking(
     settings = get_settings()
     item_res = (
         client.table("items")
-        .select("id,title,cost_per_day,minimum_day_rental,deposit_amount,active")
+        .select("id,title,cost_per_day,minimum_day_rental,deposit_amount,active,delivery_available")
         .eq("id", body.item_id)
         .limit(1)
         .execute()
@@ -840,9 +873,20 @@ def quote_booking(
 
     num_days = len(days)
     base, disc_pct, disc_sub, dep = compute_rental_amounts(cost, num_days, deposit)
-    tax_rate, tax_amt, rental_w_tax, tax_src = _sales_tax_or_http(
+    try:
+        delivery_fee, delivery_miles = compute_delivery_charge(
+            client,
+            settings,
+            item_delivery_available=bool(item.get("delivery_available", True)),
+            delivery_requested=body.delivery_requested,
+            delivery_address=body.delivery_address,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    taxable_subtotal = disc_sub + delivery_fee
+    tax_rate, tax_amt, rental_w_tax, _tax_src = _sales_tax_or_http(
         settings,
-        disc_sub,
+        taxable_subtotal,
         tax_postal_code=body.tax_postal_code,
         customer_address=None,
     )
@@ -857,8 +901,9 @@ def quote_booking(
         sales_tax_rate_percent=tax_rate,
         sales_tax_amount=tax_amt,
         rental_total_with_tax=rental_w_tax,
-        sales_tax_source=tax_src,
         deposit_amount=dep,
+        delivery_fee=delivery_fee,
+        delivery_distance_miles=delivery_miles,
     )
     return BookingQuote(
         num_days=num_days,
@@ -866,9 +911,10 @@ def quote_booking(
         discount_percent=disc_pct,
         discounted_subtotal=disc_sub,
         deposit_amount=dep,
+        delivery_fee=delivery_fee,
+        delivery_distance_miles=delivery_miles,
         sales_tax_rate_percent=tax_rate,
         sales_tax_amount=tax_amt,
         rental_total_with_tax=rental_w_tax,
-        sales_tax_source=tax_src,
         email_sent=emailed,
     )

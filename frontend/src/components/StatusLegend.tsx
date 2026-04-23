@@ -1,5 +1,6 @@
 const ITEMS: { status: string; label: string }[] = [
   { status: 'open_for_booking', label: 'Open for booking' },
+  { status: 'pending_request', label: 'Pending request (may reopen)' },
   { status: 'booked', label: 'Booked' },
   { status: 'out_for_use', label: 'Out for use' },
   { status: 'readying_for_use', label: 'Readying for use' },

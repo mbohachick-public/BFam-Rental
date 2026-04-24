@@ -35,15 +35,29 @@ _APPROVAL_STATUSES = frozenset(
 )
 
 
+def _parse_smtp_from_address(from_header: str) -> str | None:
+    """Return a single mailbox from SMTP_FROM (handles ``Name <addr@host>``)."""
+    s = (from_header or "").strip()
+    if not s:
+        return None
+    if "<" in s and ">" in s:
+        inner = s[s.index("<") + 1 : s.index(">")].strip()
+        return inner if "@" in inner else None
+    return s if "@" in s else None
+
+
 def _admin_recipient(settings: Settings) -> str | None:
-    addr = (settings.admin_notification_email or "").strip()
-    return addr or None
-
-
-def admin_action_emails_enabled(settings: Settings) -> bool:
-    from app.services.quote_email import smtp_configured
-
-    return smtp_configured(settings) and bool(_admin_recipient(settings))
+    """
+    Inbox for staff workflow mail. Explicit ADMIN_NOTIFICATION_EMAIL wins; otherwise use the
+    same mailbox as SMTP (many hosts use an email-shaped SMTP_USER, or SMTP_FROM is the ops address).
+    """
+    explicit = (settings.admin_notification_email or "").strip()
+    if explicit:
+        return explicit
+    user = (settings.smtp_user or "").strip()
+    if "@" in user:
+        return user
+    return _parse_smtp_from_address(settings.smtp_from)
 
 
 def _booking_event_exists(client: Client, booking_id: str, event_type: str) -> bool:
@@ -101,7 +115,16 @@ def _fetch_item_title(client: Client, item_id: str) -> str:
 
 
 def try_notify_admin_approval_needed(client: Client, settings: Settings, booking_id: str) -> None:
-    if not admin_action_emails_enabled(settings):
+    from app.services.quote_email import smtp_configured
+
+    if not smtp_configured(settings):
+        return
+    to = _admin_recipient(settings)
+    if not to:
+        log.warning(
+            "Admin approval email skipped: SMTP is set but no staff inbox "
+            "(set ADMIN_NOTIFICATION_EMAIL or use an email-shaped SMTP_USER / SMTP_FROM address)."
+        )
         return
     if _booking_event_exists(client, booking_id, ADMIN_EMAIL_APPROVAL_EVENT):
         return
@@ -147,9 +170,6 @@ def try_notify_admin_approval_needed(client: Client, settings: Settings, booking
 Customer: {html.escape(who)}</p>
 <p><a href="{safe_url}">Open booking in admin</a></p>
 </body></html>"""
-    to = _admin_recipient(settings)
-    if not to:
-        return
     if try_send_email(settings, to_addr=to, subject=subj, plain=plain, html_body=html_body):
         log_booking_event(
             client,
@@ -160,7 +180,16 @@ Customer: {html.escape(who)}</p>
 
 
 def try_notify_admin_confirm_needed(client: Client, settings: Settings, booking_id: str) -> None:
-    if not admin_action_emails_enabled(settings):
+    from app.services.quote_email import smtp_configured
+
+    if not smtp_configured(settings):
+        return
+    to = _admin_recipient(settings)
+    if not to:
+        log.warning(
+            "Admin confirm-ready email skipped: SMTP is set but no staff inbox "
+            "(set ADMIN_NOTIFICATION_EMAIL or use an email-shaped SMTP_USER / SMTP_FROM address)."
+        )
         return
     if _booking_event_exists(client, booking_id, ADMIN_EMAIL_CONFIRM_EVENT):
         return
@@ -193,9 +222,6 @@ def try_notify_admin_confirm_needed(client: Client, settings: Settings, booking_
 {html.escape(start)} → {html.escape(end)}</p>
 <p><a href="{safe_url}">Open booking in admin</a></p>
 </body></html>"""
-    to = _admin_recipient(settings)
-    if not to:
-        return
     if try_send_email(settings, to_addr=to, subject=subj, plain=plain, html_body=html_body):
         log_booking_event(
             client,

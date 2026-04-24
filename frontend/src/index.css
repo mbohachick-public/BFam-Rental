@@ -888,7 +888,8 @@ select:focus {
   margin-top: 1rem;
 }
 
-@media (min-width: 640px) {
+/* Keep phones in a single column; switch to 2-up on small tablets. */
+@media (min-width: 760px) {
   .booking-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -902,6 +903,24 @@ select:focus {
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 1rem;
+}
+
+@media (max-width: 759px) {
+  .booking-grid {
+    gap: 0.85rem;
+  }
+
+  .booking-block .field-label {
+    line-height: 1.25;
+  }
+
+  .booking-actions {
+    flex-direction: column;
+  }
+
+  .booking-actions .btn {
+    width: 100%;
+  }
 }
 
 .quote-lines {

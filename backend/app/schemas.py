@@ -162,7 +162,7 @@ class BookingPresignRequest(BookingContactForm):
     tow_vehicle_year: int | None = Field(default=None, ge=1950, le=2100)
     tow_vehicle_make: str | None = Field(default=None, max_length=80)
     tow_vehicle_model: str | None = Field(default=None, max_length=80)
-    tow_vehicle_tow_rating_lbs: int | None = Field(default=None, ge=0)
+    tow_vehicle_tow_rating_lbs: int | None = Field(default=None, ge=1)
     has_brake_controller: bool | None = None
     request_not_confirmed_ack: bool = False
     delivery_requested: bool = False

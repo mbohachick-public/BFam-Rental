@@ -8,7 +8,14 @@ import smtplib
 from decimal import Decimal
 from email.message import EmailMessage
 
-from app.branding import LEGAL_BUSINESS_NAME
+from app.branding import (
+    EMAIL_PUBLIC_LOGO_PATH,
+    LEGAL_BUSINESS_NAME,
+    PICKUP_FACILITY_ADDRESS,
+    PICKUP_STANDARD_TIME_LABEL,
+    RENTAL_COORDINATION_EMAIL,
+    SERVICE_AREA_TAGLINE,
+)
 from app.config import Settings
 
 log = logging.getLogger(__name__)
@@ -65,6 +72,115 @@ def try_send_email(
     except Exception as e:
         log.warning("Failed to send email to %s: %s", to_addr, e)
         return False
+
+
+def send_pickup_confirmed_email(
+    settings: Settings,
+    *,
+    to_addr: str,
+    greeting_name: str | None,
+    item_title: str,
+    pickup_date_long: str,
+    logo_url: str | None,
+) -> bool:
+    """
+    After admin confirms a booking with customer pickup (no delivery), send facility and time details.
+    """
+    if not smtp_configured(settings):
+        log.info("SMTP not configured; skipping pickup instructions to %s", to_addr)
+        return False
+    greet = (greeting_name or "").strip()
+    salutation = f"Dear {greet}," if greet else "Hello,"
+    subj = f"{LEGAL_BUSINESS_NAME} — Pickup instructions for your rental"
+    esc_item = html.escape(item_title)
+    esc_addr = html.escape(PICKUP_FACILITY_ADDRESS)
+    esc_time = html.escape(PICKUP_STANDARD_TIME_LABEL)
+    esc_when = html.escape(pickup_date_long)
+    esc_coord = html.escape(RENTAL_COORDINATION_EMAIL)
+    leg = html.escape(LEGAL_BUSINESS_NAME)
+    tag = html.escape(SERVICE_AREA_TAGLINE)
+
+    plain = "\n".join(
+        [
+            salutation,
+            "",
+            "Your rental is confirmed. Thank you for choosing "
+            f"{LEGAL_BUSINESS_NAME}. Because this reservation is for customer pickup "
+            "(not delivery), please use the details below.",
+            "",
+            "Pickup location",
+            PICKUP_FACILITY_ADDRESS,
+            "",
+            "Scheduled pickup",
+            f"Standard pickup is {PICKUP_STANDARD_TIME_LABEL} on {pickup_date_long} — "
+            "the first day of your rental period. Please arrive on time so we can complete "
+            "your paperwork and equipment walk-through.",
+            "",
+            "Alternate pickup time",
+            f"If you need to request a different pickup time, email {RENTAL_COORDINATION_EMAIL} "
+            "with your name, the equipment reserved, and your rental dates. We will reply to "
+            "confirm whether an alternate time can be accommodated.",
+            "",
+            "Equipment",
+            item_title,
+            "",
+            f"— {LEGAL_BUSINESS_NAME}",
+            SERVICE_AREA_TAGLINE,
+        ]
+    )
+
+    logo_block = ""
+    if logo_url and logo_url.strip():
+        esc_u = html.escape(logo_url.strip(), quote=True)
+        logo_block = (
+            f'<img src="{esc_u}" alt="{leg}" width="220" '
+            'style="max-width:220px;height:auto;display:block;margin:0 auto 14px;border:0"/>'
+        )
+
+    html_body = f"""\
+<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#faf8f3;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf8f3;">
+<tr><td align="center" style="padding:28px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #d6d3d1;border-radius:10px;overflow:hidden;">
+<tr><td style="background:#1e4d3a;padding:22px 24px;text-align:center;">
+{logo_block}
+<p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:19px;color:#ffffff;font-weight:600;letter-spacing:0.02em;">{leg}</p>
+<p style="margin:8px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#c7ddd4;">Pickup confirmation</p>
+</td></tr>
+<tr><td style="padding:28px 26px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#1c1917;">
+<p style="margin:0 0 16px;">{html.escape(salutation)}</p>
+<p style="margin:0 0 16px;">Your rental is <strong>confirmed</strong>. Thank you for choosing <strong>{leg}</strong>. Because this reservation is for <strong>customer pickup</strong> (not delivery), please follow the instructions below.</p>
+<h2 style="margin:22px 0 10px;font-size:14px;font-weight:700;color:#1e4d3a;text-transform:uppercase;letter-spacing:0.06em;">Pickup location</h2>
+<p style="margin:0 0 6px;">{esc_addr}</p>
+<h2 style="margin:22px 0 10px;font-size:14px;font-weight:700;color:#1e4d3a;text-transform:uppercase;letter-spacing:0.06em;">Scheduled pickup</h2>
+<p style="margin:0 0 6px;">Standard pickup is <strong>{esc_time}</strong> on <strong>{esc_when}</strong> — the first day of your rental period. Please arrive on time so we can complete your paperwork and equipment walk-through.</p>
+<h2 style="margin:22px 0 10px;font-size:14px;font-weight:700;color:#1e4d3a;text-transform:uppercase;letter-spacing:0.06em;">Alternate pickup time</h2>
+<p style="margin:0 0 6px;">If you need to request a different pickup time, email <a href="mailto:{esc_coord}" style="color:#1e4d3a;font-weight:600;">{esc_coord}</a> with your name, the equipment reserved, and your rental dates. We will reply to confirm whether an alternate time can be accommodated.</p>
+<h2 style="margin:22px 0 10px;font-size:14px;font-weight:700;color:#1e4d3a;text-transform:uppercase;letter-spacing:0.06em;">Equipment</h2>
+<p style="margin:0 0 6px;"><strong>{esc_item}</strong></p>
+<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #e7e5e4;font-size:0.9em;color:#57534e;">{leg}<br/><span style="font-size:0.95em;">{tag}</span></p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>"""
+
+    try:
+        _send_message(settings, to_addr.strip(), subj, plain, html_body)
+        return True
+    except Exception as e:
+        log.warning("Failed to send pickup instructions email: %s", e)
+        return False
+
+
+def pickup_email_logo_url(settings: Settings) -> str | None:
+    """Absolute URL to the SPA-hosted logo for HTML email (empty FRONTEND_PUBLIC_URL → no image)."""
+    base = (settings.frontend_public_url or "").strip().rstrip("/")
+    if not base:
+        return None
+    path = EMAIL_PUBLIC_LOGO_PATH if EMAIL_PUBLIC_LOGO_PATH.startswith("/") else f"/{EMAIL_PUBLIC_LOGO_PATH}"
+    return f"{base}{path}"
 
 
 def send_quote_email(

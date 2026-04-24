@@ -169,19 +169,46 @@ def _workflow_from_presign(body: BookingPresignRequest) -> dict:
     }
 
 
-def _validate_tow_vehicle_for_towable(body: BookingPresignRequest, *, towable: bool) -> None:
+def _validate_tow_vehicle_fields_for_towable(
+    *,
+    towable: bool,
+    tow_vehicle_year: int | None,
+    tow_vehicle_make: str | None,
+    tow_vehicle_model: str | None,
+    tow_vehicle_tow_rating_lbs: int | None,
+) -> None:
     if not towable:
         return
-    if body.tow_vehicle_year is None:
+    if tow_vehicle_year is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tow vehicle year is required for towable pickup rentals.",
         )
-    if not (body.tow_vehicle_make or "").strip() or not (body.tow_vehicle_model or "").strip():
+    if not (tow_vehicle_make or "").strip() or not (tow_vehicle_model or "").strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tow vehicle make and model are required for towable pickup rentals.",
         )
+    if tow_vehicle_tow_rating_lbs is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tow vehicle tow rating (lbs) is required for towable pickup rentals.",
+        )
+    if tow_vehicle_tow_rating_lbs < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tow vehicle tow rating must be at least 1 lb.",
+        )
+
+
+def _validate_tow_vehicle_for_towable(body: BookingPresignRequest, *, towable: bool) -> None:
+    _validate_tow_vehicle_fields_for_towable(
+        towable=towable,
+        tow_vehicle_year=body.tow_vehicle_year,
+        tow_vehicle_make=body.tow_vehicle_make,
+        tow_vehicle_model=body.tow_vehicle_model,
+        tow_vehicle_tow_rating_lbs=body.tow_vehicle_tow_rating_lbs,
+    )
 
 
 def _validated_booking_insert_row(
@@ -712,6 +739,11 @@ def create_booking_request(
     notes: str | None = Form(None),
     delivery_requested: str | None = Form(default=None),
     delivery_address: str | None = Form(None),
+    tow_vehicle_year: int | None = Form(default=None),
+    tow_vehicle_make: str | None = Form(default=None),
+    tow_vehicle_model: str | None = Form(default=None),
+    tow_vehicle_tow_rating_lbs: int | None = Form(default=None),
+    has_brake_controller: str | None = Form(default=None),
     drivers_license: UploadFile = File(),
     license_plate: UploadFile | None = File(default=None),
     client: Client = Depends(get_supabase_client),
@@ -765,6 +797,32 @@ def create_booking_request(
         delivery_requested=delivery_requested_bool,
         delivery_address=delivery_address,
     )
+    brake_raw = str(has_brake_controller or "").strip().lower()
+    has_brake = brake_raw in ("1", "true", "on", "yes")
+    _validate_tow_vehicle_fields_for_towable(
+        towable=towable,
+        tow_vehicle_year=tow_vehicle_year,
+        tow_vehicle_make=tow_vehicle_make,
+        tow_vehicle_model=tow_vehicle_model,
+        tow_vehicle_tow_rating_lbs=tow_vehicle_tow_rating_lbs,
+    )
+    if towable:
+        insert_row["tow_vehicle_year"] = tow_vehicle_year
+        insert_row["tow_vehicle_make"] = (tow_vehicle_make or "").strip() or None
+        insert_row["tow_vehicle_model"] = (tow_vehicle_model or "").strip() or None
+        insert_row["tow_vehicle_tow_rating_lbs"] = tow_vehicle_tow_rating_lbs
+        insert_row["has_brake_controller"] = has_brake
+    elif (
+        tow_vehicle_year is not None
+        or (tow_vehicle_make or "").strip()
+        or (tow_vehicle_model or "").strip()
+        or tow_vehicle_tow_rating_lbs is not None
+        or brake_raw
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tow vehicle fields are only allowed for towable items.",
+        )
     lp_has_file = bool(license_plate and license_plate.filename)
     if towable and not lp_has_file:
         raise HTTPException(

@@ -325,6 +325,36 @@ def test_create_booking_missing_license(client, seed_item, seed_day_statuses):
     assert res.status_code in (400, 422)
 
 
+def test_create_booking_towable_requires_tow_vehicle_fields(client, seed_item, seed_day_statuses):
+    item = seed_item(towable=True)
+    start, end = _future(5), _future(6)
+    seed_day_statuses(item["id"], [
+        (start, "open_for_booking"),
+        (end, "open_for_booking"),
+    ])
+    jpeg = _tiny_jpeg()
+    data = {
+        "item_id": item["id"],
+        "start_date": start,
+        "end_date": end,
+        "customer_email": "tow2@test.com",
+        "customer_phone": "5551234567",
+        "customer_first_name": "Tow",
+        "customer_last_name": "Two",
+        "customer_address": "789 St",
+        "tow_vehicle_year": "2020",
+        "tow_vehicle_make": "Ford",
+        "tow_vehicle_model": "F-150",
+    }
+    files = {
+        "drivers_license": ("license.jpg", io.BytesIO(jpeg), "image/jpeg"),
+        "license_plate": ("plate.jpg", io.BytesIO(jpeg), "image/jpeg"),
+    }
+    res = client.post("/booking-requests", data=data, files=files)
+    assert res.status_code == 400
+    assert "tow rating" in res.json()["detail"].lower()
+
+
 def test_create_booking_towable_requires_plate(client, seed_item, seed_day_statuses):
     item = seed_item(towable=True)
     start, end = _future(5), _future(6)
@@ -343,6 +373,11 @@ def test_create_booking_towable_requires_plate(client, seed_item, seed_day_statu
         "customer_first_name": "Tow",
         "customer_last_name": "User",
         "customer_address": "789 St",
+        "tow_vehicle_year": "2020",
+        "tow_vehicle_make": "Ford",
+        "tow_vehicle_model": "F-150",
+        "tow_vehicle_tow_rating_lbs": "8000",
+        "has_brake_controller": "false",
     }
     files = {
         "drivers_license": ("license.jpg", io.BytesIO(jpeg), "image/jpeg"),
@@ -431,6 +466,35 @@ def test_create_booking_multipart_rejected_when_supabase_storage(
     res = client.post("/booking-requests", data=data, files=files)
     assert res.status_code == 400
     assert "presign" in res.json()["detail"].lower()
+
+
+def test_presign_towable_requires_tow_rating(client, fake_settings, seed_item, seed_day_statuses):
+    fake_settings.booking_documents_storage = "supabase"
+    item = seed_item(towable=True)
+    start, end = _future(5), _future(6)
+    seed_day_statuses(item["id"], [
+        (start, "open_for_booking"),
+        (end, "open_for_booking"),
+    ])
+    body = {
+        "item_id": item["id"],
+        "start_date": start,
+        "end_date": end,
+        "customer_email": "towpre@test.com",
+        "customer_phone": "5551234567",
+        "customer_first_name": "T",
+        "customer_last_name": "P",
+        "customer_address": "1 St",
+        "drivers_license_content_type": "image/jpeg",
+        "license_plate_content_type": "image/jpeg",
+        "request_not_confirmed_ack": True,
+        "tow_vehicle_year": 2020,
+        "tow_vehicle_make": "Ford",
+        "tow_vehicle_model": "F-150",
+    }
+    pre = client.post("/booking-requests/presign", json=body)
+    assert pre.status_code == 400
+    assert "tow rating" in pre.json()["detail"].lower()
 
 
 def test_presign_and_complete_non_towable(

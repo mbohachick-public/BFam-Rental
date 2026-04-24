@@ -365,9 +365,11 @@ def test_admin_approve_mark_and_confirm_booking(
         ).status_code
         == 200
     )
-    cf = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
+    with patch("app.routers.admin.try_send_pickup_instructions_after_confirm") as pickup_mail:
+        cf = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
     assert cf.status_code == 200
     assert cf.json()["status"] == "confirmed"
+    pickup_mail.assert_called_once()
     booked = [
         r
         for r in db_store["item_day_status"]

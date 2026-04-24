@@ -245,8 +245,17 @@ export function ItemDetailPage() {
         setQuoteError('Tow vehicle year is required for towable pickup rentals.')
         return
       }
+      if (y < 1950 || y > 2100) {
+        setQuoteError('Tow vehicle year must be between 1950 and 2100.')
+        return
+      }
       if (!towMake.trim() || !towModel.trim()) {
         setQuoteError('Tow vehicle make and model are required for towable pickup rentals.')
+        return
+      }
+      const r = parseInt(towRating, 10)
+      if (!towRating.trim() || !Number.isFinite(r) || r < 1) {
+        setQuoteError('Tow vehicle tow rating (lbs) is required for towable pickup rentals.')
         return
       }
     }
@@ -271,6 +280,13 @@ export function ItemDetailPage() {
       if (item.delivery_available && deliveryRequested) {
         fd.append('delivery_requested', 'true')
         fd.append('delivery_address', deliveryAddress.trim())
+      }
+      if (item.towable) {
+        fd.append('tow_vehicle_year', String(parseInt(towYear, 10)))
+        fd.append('tow_vehicle_make', towMake.trim())
+        fd.append('tow_vehicle_model', towModel.trim())
+        fd.append('tow_vehicle_tow_rating_lbs', String(parseInt(towRating, 10)))
+        fd.append('has_brake_controller', hasBrakeController ? 'true' : 'false')
       }
       await apiPostFormData('/booking-requests', fd)
     }
@@ -297,9 +313,7 @@ export function ItemDetailPage() {
         presignBody.tow_vehicle_year = parseInt(towYear, 10)
         presignBody.tow_vehicle_make = towMake.trim()
         presignBody.tow_vehicle_model = towModel.trim()
-        if (towRating.trim()) {
-          presignBody.tow_vehicle_tow_rating_lbs = parseInt(towRating, 10)
-        }
+        presignBody.tow_vehicle_tow_rating_lbs = parseInt(towRating, 10)
         presignBody.has_brake_controller = hasBrakeController
       }
       if (item.delivery_available) {
@@ -372,6 +386,20 @@ export function ItemDetailPage() {
 
   const mainImage =
     sortedImages.length > 0 ? sortedImages[displayImageIdx]?.url : item.image_urls[0]
+
+  const towY = parseInt(towYear, 10)
+  const towR = parseInt(towRating, 10)
+  const towBookingFieldsIncomplete =
+    item.towable &&
+    (!towYear.trim() ||
+      !towMake.trim() ||
+      !towModel.trim() ||
+      !towRating.trim() ||
+      !Number.isFinite(towY) ||
+      towY < 1950 ||
+      towY > 2100 ||
+      !Number.isFinite(towR) ||
+      towR < 1)
 
   return (
     <div className="container page-item">
@@ -657,30 +685,42 @@ export function ItemDetailPage() {
           {item.towable ? (
             <>
               <label className="field">
-                <span className="field-label">Tow vehicle year</span>
+                <span className="field-label">Tow vehicle year (required)</span>
                 <input
                   type="number"
                   inputMode="numeric"
                   min={1950}
                   max={2100}
+                  required
                   value={towYear}
                   onChange={(e) => setTowYear(e.target.value)}
                 />
               </label>
               <label className="field">
-                <span className="field-label">Tow vehicle make</span>
-                <input type="text" value={towMake} onChange={(e) => setTowMake(e.target.value)} />
+                <span className="field-label">Tow vehicle make (required)</span>
+                <input
+                  type="text"
+                  required
+                  value={towMake}
+                  onChange={(e) => setTowMake(e.target.value)}
+                />
               </label>
               <label className="field">
-                <span className="field-label">Tow vehicle model</span>
-                <input type="text" value={towModel} onChange={(e) => setTowModel(e.target.value)} />
+                <span className="field-label">Tow vehicle model (required)</span>
+                <input
+                  type="text"
+                  required
+                  value={towModel}
+                  onChange={(e) => setTowModel(e.target.value)}
+                />
               </label>
               <label className="field">
-                <span className="field-label">Tow rating (lbs, optional)</span>
+                <span className="field-label">Tow rating in lbs (required)</span>
                 <input
                   type="number"
                   inputMode="numeric"
-                  min={0}
+                  min={1}
+                  required
                   value={towRating}
                   onChange={(e) => setTowRating(e.target.value)}
                 />
@@ -769,7 +809,8 @@ export function ItemDetailPage() {
               !lastName.trim() ||
               !address.trim() ||
               !requestAck ||
-              (item.delivery_available && deliveryRequested && !deliveryAddress.trim())
+              (item.delivery_available && deliveryRequested && !deliveryAddress.trim()) ||
+              towBookingFieldsIncomplete
             }
           >
             {submitting ? 'Sending…' : 'Submit Booking'}

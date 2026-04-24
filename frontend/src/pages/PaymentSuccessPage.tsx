@@ -6,6 +6,43 @@ import type { BookingPaymentStatusPublic } from '../types'
 
 const SIGN_TOKEN_KEY = (bookingId: string) => `bfam_sign_token:${bookingId}`
 
+/** Customer-facing copy; internal statuses stay unchanged in the API. */
+function customerFacingBookingStatus(status: string): string {
+  switch (status) {
+    case 'approved_pending_payment':
+    case 'approved_pending_check_clearance':
+      return 'Waiting for final confirmation'
+    case 'approved_awaiting_signature':
+      return 'Waiting for your signature'
+    case 'confirmed':
+      return 'Confirmed'
+    case 'ready_for_pickup':
+      return 'Ready for pickup'
+    case 'checked_out':
+      return 'Checked out'
+    case 'returned_pending_inspection':
+      return 'Returned — inspection pending'
+    case 'completed':
+      return 'Completed'
+    case 'completed_with_charges':
+      return 'Completed (with charges)'
+    case 'declined':
+    case 'rejected':
+      return 'Not approved'
+    case 'cancelled':
+      return 'Cancelled'
+    case 'pending':
+    case 'requested':
+    case 'under_review':
+      return 'In review'
+    default:
+      return status
+        .split('_')
+        .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+        .join(' ')
+  }
+}
+
 export function PaymentSuccessPage() {
   const [params] = useSearchParams()
   const bookingId = params.get('booking_id')?.trim() ?? ''
@@ -83,7 +120,7 @@ export function PaymentSuccessPage() {
           </div>
           <div>
             <dt>Status</dt>
-            <dd>{data.status}</dd>
+            <dd>{customerFacingBookingStatus(data.status)}</dd>
           </div>
           <div>
             <dt>Rental payment</dt>

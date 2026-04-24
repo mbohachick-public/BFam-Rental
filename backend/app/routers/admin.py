@@ -49,6 +49,7 @@ from app.services.admin_notify import try_notify_admin_confirm_needed
 from app.services.booking_events import log_booking_event
 from app.services.contract_signing import create_signing_package, signing_url
 from app.services.delivery_pricing import load_delivery_settings_row
+from app.services.pickup_instructions_email import try_send_pickup_instructions_after_confirm
 from app.services.quote_email import (
     send_booking_approved_email,
     send_booking_declined_email,
@@ -782,6 +783,7 @@ def admin_confirm_booking(
     ).execute()
     log_booking_event(client, booking_id=request_id, event_type="confirmed", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    try_send_pickup_instructions_after_confirm(client, get_settings(), res2.data[0])
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 

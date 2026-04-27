@@ -7,6 +7,15 @@ Production is defined as **two Render services** in the repo root [`render.yaml`
 1. **`bfam-rental-api`** — `runtime: docker`, [`backend/Dockerfile`](../backend/Dockerfile), health check `GET /health`.
 2. **`bfam-rental-web`** — `runtime: static`, Vite build from `frontend/`, publish `frontend/dist`.
 
+### Static site: deep links (`/booking-actions/…`, `/admin/…`, etc.)
+
+React Router paths are not real files on disk. If the CDN returns plain text **`Not Found`** for a URL like `https://www.example.com/booking-actions/TOKEN/sign`, the **SPA fallback** is not active.
+
+1. **Render Dashboard (required):** open **`bfam-rental-web`** → **Redirects / Rewrites** → add **Rewrite** (not redirect): **Source** `/*` → **Destination** `/index.html`. [Render docs: static rewrites](https://render.com/docs/redirects-rewrites). Re-check this after attaching **custom domains** (`www` vs apex); Blueprint `routes` in [`render.yaml`](../render.yaml) should match, but the Dashboard rule is the reliable place to confirm.
+2. **404 fallback:** the frontend build copies `index.html` to **`dist/404.html`** (`postbuild` in [`frontend/package.json`](../frontend/package.json)) so hosts that serve `404.html` for unknown paths still load the SPA.
+3. **`CORS_ORIGINS`** on the API must include **every** origin customers use (e.g. both `https://bohachickrentals.com` and `https://www.bohachickrentals.com` if both serve the app).
+4. **Approval email payment links** (`stripe_checkout_url` / `stripe_deposit_checkout_url`) require **`STRIPE_SECRET_KEY`** on the API, **`payment_path`** = card for that booking, and valid **`FRONTEND_PUBLIC_URL`** / **`APP_BASE_URL`** for Stripe return URLs. If links are missing only in production, check Render API env and logs for `stripe_checkout_at_email_skipped`.
+
 This is **layout B** (split hosts): the SPA and API have different `https://…onrender.com` URLs unless you later put a custom domain and reverse proxy in front.
 
 ### Repeatable deploys

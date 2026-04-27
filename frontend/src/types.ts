@@ -206,7 +206,7 @@ export interface StripeCheckoutSessionOut {
   stripe_deposit_checkout_session_id?: string | null
   stripe_deposit_checkout_url?: string | null
   stripe_deposit_checkout_created_at?: string | null
-  /** Regenerate: `skipped_payment_links_in_approval_email` (links are in approve / resend emails). */
+  /** `sent` | `skipped_no_smtp` | `skipped_no_customer_email` | `skipped_payment_links_in_approval_email` (awaiting signature) | … */
   stripe_checkout_email_status?: string | null
 }
 

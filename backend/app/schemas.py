@@ -304,7 +304,8 @@ class StripeCheckoutSessionOut(BaseModel):
     stripe_deposit_checkout_session_id: str | None = None
     stripe_deposit_checkout_url: str | None = None
     stripe_deposit_checkout_created_at: str | None = None
-    #: ``skipped_payment_links_in_approval_email`` (regenerate) | legacy send statuses if reintroduced
+    #: ``sent`` | ``skipped_no_smtp`` | ``skipped_no_customer_email`` | ``skipped_no_payment_links`` |
+    #: ``skipped_payment_links_in_approval_email`` (awaiting signature — use resend signing email) | ``failed_smtp:…``
     stripe_checkout_email_status: str | None = None
 
 

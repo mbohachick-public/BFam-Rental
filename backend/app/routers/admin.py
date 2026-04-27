@@ -53,6 +53,7 @@ from app.services.pickup_instructions_email import try_send_pickup_instructions_
 from app.services.quote_email import (
     send_booking_approved_email,
     send_booking_declined_email,
+    send_stripe_checkout_ready_email,
 )
 from app.services.stripe_checkout import create_checkout_session_for_booking
 from app.services.stripe_deposit_refund import refund_stripe_deposit_for_booking
@@ -611,6 +612,41 @@ def admin_create_stripe_checkout_session(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Stripe checkout could not be created: {e}",
         ) from e
+
+    res_row = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    row = (res_row.data or [None])[0]
+    if not row:
+        email_status = "skipped_no_payment_links"
+    else:
+        st = str(row.get("status") or "")
+        if st != BookingRequestStatus.approved_pending_payment.value:
+            # Checkout email copy assumes the agreement is signed; approval/resend emails carry links earlier.
+            email_status = "skipped_payment_links_in_approval_email"
+        else:
+            to_addr = (row.get("customer_email") or "").strip()
+            if not to_addr:
+                email_status = "skipped_no_customer_email"
+            else:
+                item_res = (
+                    client.table("items")
+                    .select("title")
+                    .eq("id", row["item_id"])
+                    .limit(1)
+                    .execute()
+                )
+                item_title = str((item_res.data or [{}])[0].get("title") or "Rental item")
+                rent_u = str(row.get("stripe_checkout_url") or "").strip() or None
+                dep_u = str(row.get("stripe_deposit_checkout_url") or "").strip() or None
+                email_status = send_stripe_checkout_ready_email(
+                    settings,
+                    to_addr=to_addr,
+                    item_title=item_title,
+                    rental_checkout_url=rent_u,
+                    deposit_checkout_url=dep_u,
+                    rental_total_with_tax=_decimal(row.get("rental_total_with_tax") or 0),
+                    deposit_amount=_decimal(row.get("deposit_amount") or 0),
+                )
+
     return StripeCheckoutSessionOut(
         stripe_checkout_session_id=out["stripe_checkout_session_id"],
         stripe_checkout_url=out["stripe_checkout_url"],
@@ -618,7 +654,7 @@ def admin_create_stripe_checkout_session(
         stripe_deposit_checkout_session_id=out.get("stripe_deposit_checkout_session_id"),
         stripe_deposit_checkout_url=out.get("stripe_deposit_checkout_url"),
         stripe_deposit_checkout_created_at=out.get("stripe_deposit_checkout_created_at"),
-        stripe_checkout_email_status="skipped_payment_links_in_approval_email",
+        stripe_checkout_email_status=email_status,
     )
 
 

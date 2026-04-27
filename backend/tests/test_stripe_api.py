@@ -249,6 +249,14 @@ def test_admin_stripe_checkout_session(client, admin_headers, fake_settings, db_
 
     monkeypatch.setattr("app.services.stripe_checkout.stripe.checkout.Session.create", _fake_create)
 
+    email_calls: list[dict] = []
+
+    def _fake_checkout_email(*args, **kwargs):
+        email_calls.append({"kwargs": kwargs})
+        return "sent"
+
+    monkeypatch.setattr("app.routers.admin.send_stripe_checkout_ready_email", _fake_checkout_email)
+
     item = seed_item()
     bid = "cccccccc-cccc-cccc-cccc-cccccccccccc"
     db_store["booking_requests"].append(
@@ -269,7 +277,12 @@ def test_admin_stripe_checkout_session(client, admin_headers, fake_settings, db_
     r = client.post(f"/admin/booking-requests/{bid}/stripe-checkout-session", headers=admin_headers)
     assert r.status_code == 200
     out = r.json()
-    assert out.get("stripe_checkout_email_status") == "skipped_payment_links_in_approval_email"
+    assert out.get("stripe_checkout_email_status") == "sent"
+    assert len(email_calls) == 1
+    kw = email_calls[0]["kwargs"]
+    assert kw["to_addr"] == "pay@test.com"
+    assert "checkout.stripe.com" in (kw.get("rental_checkout_url") or "")
+    assert "checkout.stripe.com" in (kw.get("deposit_checkout_url") or "")
     assert out["stripe_checkout_session_id"] == "cs_test_1"
     assert "checkout.stripe.com" in (out["stripe_checkout_url"] or "")
     assert out["stripe_deposit_checkout_session_id"] == "cs_test_2"
@@ -286,6 +299,91 @@ def test_admin_stripe_checkout_session(client, admin_headers, fake_settings, db_
     row = next(rw for rw in db_store["booking_requests"] if rw["id"] == bid)
     assert row.get("stripe_checkout_session_id") == "cs_test_1"
     assert row.get("stripe_deposit_checkout_session_id") == "cs_test_2"
+
+
+def test_admin_stripe_checkout_skips_payment_email_while_awaiting_signature(
+    client, admin_headers, fake_settings, db_store, seed_item, monkeypatch
+):
+    """Regenerate creates sessions, but checkout-ready email copy assumes the agreement is signed."""
+    fake_settings.stripe_secret_key = "sk_test_fake"
+    sent = []
+
+    def _fake_create(**kwargs):
+        m = MagicMock()
+        m.id = "cs_test_sig"
+        m.url = "https://checkout.stripe.com/c/pay/cs_test_sig"
+        return m
+
+    monkeypatch.setattr("app.services.stripe_checkout.stripe.checkout.Session.create", _fake_create)
+
+    def _no_email(*_a, **_k):
+        sent.append(True)
+        return "sent"
+
+    monkeypatch.setattr("app.routers.admin.send_stripe_checkout_ready_email", _no_email)
+
+    item = seed_item()
+    bid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item["id"],
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-03",
+            "status": "approved_awaiting_signature",
+            "payment_path": "card",
+            "rental_total_with_tax": 150.0,
+            "deposit_amount": 0.0,
+            "customer_email": "sig@test.com",
+            "rental_paid_at": None,
+        }
+    )
+    r = client.post(f"/admin/booking-requests/{bid}/stripe-checkout-session", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json().get("stripe_checkout_email_status") == "skipped_payment_links_in_approval_email"
+    assert sent == []
+
+
+def test_admin_stripe_checkout_email_skipped_without_customer_email(
+    client, admin_headers, fake_settings, db_store, seed_item, monkeypatch
+):
+    fake_settings.stripe_secret_key = "sk_test_fake"
+    sent = []
+
+    def _fake_create(**kwargs):
+        m = MagicMock()
+        m.id = "cs_test_ne"
+        m.url = "https://checkout.stripe.com/c/pay/cs_test_ne"
+        return m
+
+    monkeypatch.setattr("app.services.stripe_checkout.stripe.checkout.Session.create", _fake_create)
+
+    def _no_email(*_a, **_k):
+        sent.append(True)
+        return "sent"
+
+    monkeypatch.setattr("app.routers.admin.send_stripe_checkout_ready_email", _no_email)
+
+    item = seed_item()
+    bid = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item["id"],
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-03",
+            "status": "approved_pending_payment",
+            "payment_path": "card",
+            "rental_total_with_tax": 150.0,
+            "deposit_amount": 0.0,
+            "customer_email": "",
+            "rental_paid_at": None,
+        }
+    )
+    r = client.post(f"/admin/booking-requests/{bid}/stripe-checkout-session", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json().get("stripe_checkout_email_status") == "skipped_no_customer_email"
+    assert sent == []
 
 
 def test_admin_stripe_checkout_rental_only_when_deposit_disabled(
@@ -324,6 +422,7 @@ def test_admin_stripe_checkout_rental_only_when_deposit_disabled(
     assert r.status_code == 200
     assert len(captured.get("line_items") or []) == 1
     assert captured["metadata"].get("deposit_in_checkout") == "0"
+    assert r.json().get("stripe_checkout_email_status") == "skipped_no_smtp"
 
 
 def test_sign_complete_returns_stripe_checkout_url(client, db_store, seed_item):

@@ -185,8 +185,10 @@ export function AdminBookingsPage() {
         {},
       )
       const es = out.stripe_checkout_email_status
-      if (es === 'skipped_payment_links_in_approval_email') {
-        // Payment links are sent in the approval / resend-signature email; no separate checkout email.
+      if (es === 'sent') {
+        window.alert('Stripe links were saved and a payment email was sent to the customer.')
+      } else if (es === 'skipped_payment_links_in_approval_email') {
+        // Awaiting signature: email copy assumes signed agreement; use Resend signing email for links, or customer pays after signing.
       } else if (es && es !== 'sent') {
         const hint =
           es === 'skipped_no_smtp'
@@ -518,7 +520,7 @@ export function AdminBookingsPage() {
                           title={
                             r.rental_paid_at && r.deposit_secured_at
                               ? 'Rental paid and deposit secured'
-                              : 'Recreates Stripe Checkout sessions when needed. Payment links are emailed with the signing link when the booking is approved or the signature email is resent — not from this button.'
+                              : 'Creates or recreates Stripe Checkout sessions. After the customer has signed (awaiting payment), this emails them the payment links if SMTP is configured. While still awaiting signature, use Resend signing email for links in the approval message.'
                           }
                           onClick={() => void generateStripeCheckout(r.id)}
                         >

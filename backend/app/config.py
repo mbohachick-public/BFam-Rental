@@ -182,7 +182,22 @@ class Settings(BaseSettings):
     @field_validator("frontend_public_url", "app_base_url")
     @classmethod
     def public_browser_origin(cls, v: str) -> str:
-        return _normalize_public_origin(v)
+        v = _normalize_public_origin(v)
+        if not v:
+            return ""
+        if "index.html" in v.lower():
+            raise ValueError(
+                "FRONTEND_PUBLIC_URL and APP_BASE_URL must be the site origin only "
+                "(e.g. https://www.example.com), not a path to index.html."
+            )
+        parsed = urlparse(v)
+        path = (parsed.path or "").rstrip("/")
+        if path:
+            raise ValueError(
+                "FRONTEND_PUBLIC_URL and APP_BASE_URL must not include a URL path "
+                "(use https://www.example.com, not a subdirectory)."
+            )
+        return v
 
     @property
     def cors_origin_list(self) -> list[str]:

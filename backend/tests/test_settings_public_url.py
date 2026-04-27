@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import json
 
+import pytest
+
 from app.config import Settings
 
 
@@ -40,3 +42,13 @@ def test_frontend_public_url_strips_trailing_slash() -> None:
 def test_app_base_url_bare_host_gets_https() -> None:
     s = _settings(frontend_public_url="http://localhost:5173", app_base_url="pay.example.com")
     assert s.app_base_url == "https://pay.example.com"
+
+
+def test_frontend_public_url_rejects_index_html() -> None:
+    with pytest.raises(ValueError, match="index.html"):
+        _settings(frontend_public_url="https://www.example.com/index.html")
+
+
+def test_frontend_public_url_rejects_subpath() -> None:
+    with pytest.raises(ValueError, match="path"):
+        _settings(frontend_public_url="https://www.example.com/app")

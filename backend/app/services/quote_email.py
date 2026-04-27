@@ -20,6 +20,11 @@ from app.config import Settings
 
 log = logging.getLogger(__name__)
 
+# SMTP2Go (and similar providers) optionally rewrite https:// links for click tracking, which can
+# break long tokenized URLs (signing) and Stripe Checkout session links. Append this after opening
+# <a ...> per their docs, e.g. <a href="https://..." no-track>
+NO_TRACK_A_ATTR = " no-track"
+
 
 def _plain_signature_lines() -> list[str]:
     return ["", "--", LEGAL_BUSINESS_NAME]
@@ -295,7 +300,7 @@ def _approval_steps_progress_html(steps: list[tuple[str, str | None]]) -> str:
             lab_cells.append(
                 f'<td align="center" valign="top" style="padding:6px 4px;font-size:13px;'
                 f'font-family:Arial,sans-serif;color:#334155;line-height:1.35">'
-                f'<a href="{esc_h}" style="color:#1d4ed8;font-weight:600">{esc_t}</a></td>'
+                f'<a href="{esc_h}"{NO_TRACK_A_ATTR} style="color:#1d4ed8;font-weight:600">{esc_t}</a></td>'
             )
         else:
             lab_cells.append(
@@ -361,7 +366,7 @@ def send_booking_approved_email(
     pay_follow_html = ""
     if pp == "card" and not rent_u and coll_u:
         pay_follow_plain = ["", "Additional reference link:", coll_u, ""]
-        pay_follow_html = f'<p class="muted" style="font-size:0.9em">Reference: <a href="{html.escape(coll_u, quote=True)}">{html.escape(coll_u)}</a></p>'
+        pay_follow_html = f'<p class="muted" style="font-size:0.9em">Reference: <a href="{html.escape(coll_u, quote=True)}"{NO_TRACK_A_ATTR}>{html.escape(coll_u)}</a></p>'
     elif pp == "card" and not rent_u and not coll_u:
         pay_follow_plain = [
             "",
@@ -372,7 +377,7 @@ def send_booking_approved_email(
     elif coll_u and not rent_u and pp != "card":
         if not any(s[0] == "Payment instructions" for s in steps):
             pay_follow_plain = ["", "Payment / next steps:", coll_u, ""]
-            pay_follow_html = f'<p><strong>Payment / next steps</strong><br/><a href="{html.escape(coll_u, quote=True)}">Open link</a></p>'
+            pay_follow_html = f'<p><strong>Payment / next steps</strong><br/><a href="{html.escape(coll_u, quote=True)}"{NO_TRACK_A_ATTR}>Open link</a></p>'
 
     stripe_footer = ""
     if pp == "card" and (rent_u or dep_u):
@@ -541,7 +546,8 @@ def send_stripe_checkout_ready_email(
         )
         esc_r = html.escape(rent_u, quote=True)
         html_blocks.append(
-            f'<p><strong>1) Rental balance</strong> (rental total with tax)</p><p><a href="{esc_r}">Open rental payment (Stripe)</a></p>'
+            f'<p><strong>1) Rental balance</strong> (rental total with tax)</p>'
+            f'<p><a href="{esc_r}"{NO_TRACK_A_ATTR}>Open rental payment (Stripe)</a></p>'
         )
     if dep_u:
         plain_blocks.extend(
@@ -553,7 +559,8 @@ def send_stripe_checkout_ready_email(
         )
         esc_d = html.escape(dep_u, quote=True)
         html_blocks.append(
-            f'<p><strong>2) Security deposit</strong> (refundable per agreement)</p><p><a href="{esc_d}">Open deposit payment (Stripe)</a></p>'
+            f'<p><strong>2) Security deposit</strong> (refundable per agreement)</p>'
+            f'<p><a href="{esc_d}"{NO_TRACK_A_ATTR}>Open deposit payment (Stripe)</a></p>'
         )
     plain_blocks.extend(
         [

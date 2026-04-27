@@ -12,7 +12,7 @@ from app.branding import LEGAL_BUSINESS_NAME
 from app.config import Settings
 from app.schemas import BookingRequestStatus
 from app.services.booking_events import log_booking_event
-from app.services.quote_email import try_send_email
+from app.services.quote_email import NO_TRACK_A_ATTR, try_send_email
 
 log = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ def try_notify_admin_approval_needed(client: Client, settings: Settings, booking
 <p>{html.escape(item_title)}<br/>
 {html.escape(start)} → {html.escape(end)}<br/>
 Customer: {html.escape(who)}</p>
-<p><a href="{safe_url}">Open booking in admin</a></p>
+<p><a href="{safe_url}"{NO_TRACK_A_ATTR}>Open booking in admin</a></p>
 </body></html>"""
     if try_send_email(settings, to_addr=to, subject=subj, plain=plain, html_body=html_body):
         log_booking_event(
@@ -220,7 +220,7 @@ def try_notify_admin_confirm_needed(client: Client, settings: Settings, booking_
 <p>Rental payment, deposit (if applicable), and signed agreement are satisfied.</p>
 <p>{html.escape(item_title)}<br/>
 {html.escape(start)} → {html.escape(end)}</p>
-<p><a href="{safe_url}">Open booking in admin</a></p>
+<p><a href="{safe_url}"{NO_TRACK_A_ATTR}>Open booking in admin</a></p>
 </body></html>"""
     if try_send_email(settings, to_addr=to, subject=subj, plain=plain, html_body=html_body):
         log_booking_event(

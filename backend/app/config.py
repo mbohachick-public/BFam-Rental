@@ -8,6 +8,23 @@ from urllib.parse import urlparse
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+def _normalize_public_origin(v: str) -> str:
+    """
+    Ensure email and Stripe redirect bases are absolute URLs.
+    Env dashboards often omit the scheme (e.g. bohachickrentals.com); email clients then treat
+    links as relative and they break. Local dev should keep an explicit http:// URL.
+    """
+    v = (v or "").strip().rstrip("/")
+    if not v:
+        return ""
+    lower = v.lower()
+    if lower.startswith("http://") or lower.startswith("https://"):
+        return v
+    if v.startswith("/"):
+        return v
+    return f"https://{v}"
+
 # `app/config.py` → repository `backend/` (where `.env` with SUPABASE_* usually lives).
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _BACKEND_DOTENV = _BACKEND_DIR / ".env"
@@ -161,6 +178,11 @@ class Settings(BaseSettings):
         if s not in ("local", "supabase"):
             raise ValueError('ITEM_IMAGES_STORAGE must be "local" or "supabase".')
         return s
+
+    @field_validator("frontend_public_url", "app_base_url")
+    @classmethod
+    def public_browser_origin(cls, v: str) -> str:
+        return _normalize_public_origin(v)
 
     @property
     def cors_origin_list(self) -> list[str]:

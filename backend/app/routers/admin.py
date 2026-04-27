@@ -569,7 +569,6 @@ def admin_resend_signature_link(
         item_title=item_title,
         payment_path=pp,
     )
-    client.table("booking_requests").update({"payment_path": PaymentPath.card.value}).eq("id", request_id).execute()
     sign_url = signing_url(settings, raw_token)
     _try_create_card_checkout_sessions(client, settings, request_id)
     res_row = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()

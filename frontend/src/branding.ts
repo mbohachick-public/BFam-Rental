@@ -6,4 +6,4 @@ export const SERVICE_AREA_TAGLINE =
   'Proudly Serving the Northland — Smithville, Liberty, and Beyond.'
 
 /** Short offer line */
-export const OFFER_TAGLINE = 'Equipment and trailer rentals.'
+export const OFFER_TAGLINE = 'Dump trailers, equipment trailers and material delivery.'

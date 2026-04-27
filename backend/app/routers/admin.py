@@ -61,6 +61,12 @@ from app.services.stripe_payment_reconcile import sync_booking_checkout_sessions
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
+@router.get("/session")
+def admin_session() -> dict[str, bool]:
+    """Confirm the caller's Bearer token is authorized for admin routes (same checks as require_admin)."""
+    return {"admin": True}
+
+
 def _decimal(v: object) -> Decimal:
     return Decimal(str(v))
 

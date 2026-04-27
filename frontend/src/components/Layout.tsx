@@ -1,11 +1,9 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { LEGAL_BUSINESS_NAME, OFFER_TAGLINE, SERVICE_AREA_TAGLINE } from '../branding'
-import { useAuth } from '../context/AuthContext'
 import { useCustomerSession } from '../context/CustomerSessionContext'
 import { useAdminApiReady } from '../hooks/useAdminApiReady'
 
 export function Layout() {
-  const { logout } = useAuth()
   const customer = useCustomerSession()
   const adminApiReady = useAdminApiReady()
 
@@ -56,19 +54,10 @@ export function Layout() {
               </>
             )}
             {adminApiReady ? (
-              <>
-                <NavLink to="/admin/items" className="nav-link">
-                  Admin
-                </NavLink>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={logout}>
-                  Admin out
-                </button>
-              </>
-            ) : (
-              <NavLink to="/admin/login" className="nav-link">
+              <NavLink to="/admin/items" className="nav-link">
                 Admin
               </NavLink>
-            )}
+            ) : null}
           </nav>
         </div>
       </header>

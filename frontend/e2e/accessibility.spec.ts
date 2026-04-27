@@ -81,24 +81,9 @@ test.describe('Accessibility audits', () => {
     expect(serious, `Item detail has ${serious.length} serious a11y issue(s)`).toHaveLength(0)
   })
 
-  test('Admin login (/admin/login)', async ({ page }) => {
-    await page.goto('/admin/login')
-    const results = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-      .analyze()
-    const serious = results.violations.filter(
-      (v) => v.impact === 'critical' || v.impact === 'serious',
-    )
-    if (serious.length > 0) {
-      console.log('Admin login a11y issues:\n', formatViolations(serious))
-    }
-    expect(serious, `Admin login has ${serious.length} serious a11y issue(s)`).toHaveLength(0)
-  })
-
   test('Admin items (/admin/items)', async ({ page }) => {
     test.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN for admin UI')
     await loginAsAdmin(page)
-    await page.goto('/admin/items')
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .analyze()

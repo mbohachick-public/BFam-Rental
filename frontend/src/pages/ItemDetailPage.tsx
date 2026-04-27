@@ -53,7 +53,6 @@ export function ItemDetailPage() {
   const [towYear, setTowYear] = useState('')
   const [towMake, setTowMake] = useState('')
   const [towModel, setTowModel] = useState('')
-  const [towRating, setTowRating] = useState('')
   const [hasBrakeController, setHasBrakeController] = useState(false)
   const [requestAck, setRequestAck] = useState(false)
   const [deliveryRequested, setDeliveryRequested] = useState(false)
@@ -84,7 +83,6 @@ export function ItemDetailPage() {
     setTowYear('')
     setTowMake('')
     setTowModel('')
-    setTowRating('')
     setHasBrakeController(false)
     setRequestAck(false)
     setDeliveryRequested(false)
@@ -253,11 +251,6 @@ export function ItemDetailPage() {
         setQuoteError('Tow vehicle make and model are required for towable pickup rentals.')
         return
       }
-      const r = parseInt(towRating, 10)
-      if (!towRating.trim() || !Number.isFinite(r) || r < 1) {
-        setQuoteError('Tow vehicle tow rating (lbs) is required for towable pickup rentals.')
-        return
-      }
     }
     setSubmitting(true)
     setSubmitOk(null)
@@ -285,7 +278,6 @@ export function ItemDetailPage() {
         fd.append('tow_vehicle_year', String(parseInt(towYear, 10)))
         fd.append('tow_vehicle_make', towMake.trim())
         fd.append('tow_vehicle_model', towModel.trim())
-        fd.append('tow_vehicle_tow_rating_lbs', String(parseInt(towRating, 10)))
         fd.append('has_brake_controller', hasBrakeController ? 'true' : 'false')
       }
       await apiPostFormData('/booking-requests', fd)
@@ -313,7 +305,6 @@ export function ItemDetailPage() {
         presignBody.tow_vehicle_year = parseInt(towYear, 10)
         presignBody.tow_vehicle_make = towMake.trim()
         presignBody.tow_vehicle_model = towModel.trim()
-        presignBody.tow_vehicle_tow_rating_lbs = parseInt(towRating, 10)
         presignBody.has_brake_controller = hasBrakeController
       }
       if (item.delivery_available) {
@@ -388,18 +379,14 @@ export function ItemDetailPage() {
     sortedImages.length > 0 ? sortedImages[displayImageIdx]?.url : item.image_urls[0]
 
   const towY = parseInt(towYear, 10)
-  const towR = parseInt(towRating, 10)
   const towBookingFieldsIncomplete =
     item.towable &&
     (!towYear.trim() ||
       !towMake.trim() ||
       !towModel.trim() ||
-      !towRating.trim() ||
       !Number.isFinite(towY) ||
       towY < 1950 ||
-      towY > 2100 ||
-      !Number.isFinite(towR) ||
-      towR < 1)
+      towY > 2100)
 
   return (
     <div className="container page-item">
@@ -500,19 +487,6 @@ export function ItemDetailPage() {
             </button>
           </p>
         )}
-        <p className="muted">
-          Pick a range within the next 60 days, then upload your license (and plate if towable).
-          All days must be open for booking.{' '}
-          <strong>Email is required</strong> — we email your quote when you click Get quote (SMTP must
-          be configured on the API). License photo: JPEG, PNG, or WebP, max 10 MB.
-          {item.towable ? ' Towable rentals also require a photo of your tow vehicle’s license plate.' : ''}
-        </p>
-        <p className="muted small">
-          After approval, rental totals are usually paid with a <strong>secure card checkout</strong>{' '}
-          (and a separate deposit link when applicable). The rental team will confirm details.
-          Submitting this form is a <strong>request only</strong> — it does not guarantee availability
-          until the rental team approves dates, payment, deposit, and agreement.
-        </p>
         <form
           className="booking-form"
           autoComplete="on"
@@ -712,17 +686,6 @@ export function ItemDetailPage() {
                   required
                   value={towModel}
                   onChange={(e) => setTowModel(e.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">Tow rating in lbs (required)</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  required
-                  value={towRating}
-                  onChange={(e) => setTowRating(e.target.value)}
                 />
               </label>
               <label className="field field-checkbox field-span">

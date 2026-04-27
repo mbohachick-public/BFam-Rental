@@ -122,3 +122,19 @@ def test_item_summary_includes_active_field(client, seed_item):
     if items:
         assert "active" in items[0]
         assert items[0]["active"] is True
+
+
+def test_material_delivery_contact_uses_smtp_user(fake_settings, client):
+    fake_settings.smtp_user = "dispatch@example.com"
+    fake_settings.smtp_from = "noreply@example.com"
+    res = client.get("/items/material-delivery-contact")
+    assert res.status_code == 200
+    assert res.json()["email"] == "dispatch@example.com"
+
+
+def test_material_delivery_contact_falls_back_to_smtp_from(fake_settings, client):
+    fake_settings.smtp_user = "apikey"
+    fake_settings.smtp_from = "Bohachick Rentals <renters@bohachickrentals.com>"
+    res = client.get("/items/material-delivery-contact")
+    assert res.status_code == 200
+    assert res.json()["email"] == "renters@bohachickrentals.com"

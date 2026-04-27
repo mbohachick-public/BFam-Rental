@@ -16,6 +16,7 @@ from app.services.dates import iter_days_inclusive
 from app.services.item_availability import day_availability_range
 from app.services.item_availability_seed import ensure_booking_window_day_status_for_items
 from app.services.item_images_storage import local_asset_file_path
+from app.services.quote_email import smtp_account_mailbox
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -124,6 +125,21 @@ def serve_local_item_asset_image(item_id: str, filename: str):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     media, _ = mimetypes.guess_type(local.name)
     return FileResponse(local, media_type=media or "application/octet-stream")
+
+
+@router.get("/material-delivery-contact")
+def material_delivery_contact() -> dict[str, str]:
+    settings = get_settings()
+    email = smtp_account_mailbox(settings)
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Material delivery contact is unavailable. Configure SMTP_USER "
+                "(email) or SMTP_FROM in backend environment settings."
+            ),
+        )
+    return {"email": email}
 
 
 @router.get("/{item_id}", response_model=ItemDetail)

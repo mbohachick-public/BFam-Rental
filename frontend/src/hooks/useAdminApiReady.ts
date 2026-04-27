@@ -1,10 +1,16 @@
-import { useAuth } from '../context/AuthContext'
-import { useCustomerSession } from '../context/CustomerSessionContext'
+import { useAdminSession } from '../context/AdminSessionContext'
 
-/** True when admin API calls can run: Auth0 session + explicit “Continue to admin”. */
+/** True when the access token is accepted as admin by GET /admin/session. */
 export function useAdminApiReady(): boolean {
-  const { adminAuth0Session } = useAuth()
-  const customer = useCustomerSession()
-  if (customer.mode !== 'auth0') return false
-  return customer.isAuthenticated && adminAuth0Session
+  return useAdminSession().ready
+}
+
+/** True while verifying admin access with the API. */
+export function useAdminApiPending(): boolean {
+  return useAdminSession().pending
+}
+
+/** True when the current user is signed in but not accepted as admin by the API. */
+export function useAdminApiDenied(): boolean {
+  return useAdminSession().denied
 }

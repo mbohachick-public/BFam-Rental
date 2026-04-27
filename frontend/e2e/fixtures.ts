@@ -147,9 +147,9 @@ export async function loginAsAdmin(page: Page) {
       'loginAsAdmin requires E2E_AUTH0_ACCESS_TOKEN and VITE_E2E_AUTH0_ACCESS_TOKEN (same JWT) for dev + Playwright.',
     )
   }
-  await page.goto('/admin/login')
-  await page.getByRole('button', { name: /continue to admin/i }).click()
+  await page.goto('/admin/items')
   await page.waitForURL(/\/admin\/items/)
+  await expect(page.getByRole('heading', { name: /^items$/i })).toBeVisible()
 }
 
 /* ------------------------------------------------------------------ */

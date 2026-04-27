@@ -175,7 +175,6 @@ def _validate_tow_vehicle_fields_for_towable(
     tow_vehicle_year: int | None,
     tow_vehicle_make: str | None,
     tow_vehicle_model: str | None,
-    tow_vehicle_tow_rating_lbs: int | None,
 ) -> None:
     if not towable:
         return
@@ -189,16 +188,6 @@ def _validate_tow_vehicle_fields_for_towable(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tow vehicle make and model are required for towable pickup rentals.",
         )
-    if tow_vehicle_tow_rating_lbs is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tow vehicle tow rating (lbs) is required for towable pickup rentals.",
-        )
-    if tow_vehicle_tow_rating_lbs < 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tow vehicle tow rating must be at least 1 lb.",
-        )
 
 
 def _validate_tow_vehicle_for_towable(body: BookingPresignRequest, *, towable: bool) -> None:
@@ -207,7 +196,6 @@ def _validate_tow_vehicle_for_towable(body: BookingPresignRequest, *, towable: b
         tow_vehicle_year=body.tow_vehicle_year,
         tow_vehicle_make=body.tow_vehicle_make,
         tow_vehicle_model=body.tow_vehicle_model,
-        tow_vehicle_tow_rating_lbs=body.tow_vehicle_tow_rating_lbs,
     )
 
 
@@ -804,7 +792,6 @@ def create_booking_request(
         tow_vehicle_year=tow_vehicle_year,
         tow_vehicle_make=tow_vehicle_make,
         tow_vehicle_model=tow_vehicle_model,
-        tow_vehicle_tow_rating_lbs=tow_vehicle_tow_rating_lbs,
     )
     if towable:
         insert_row["tow_vehicle_year"] = tow_vehicle_year

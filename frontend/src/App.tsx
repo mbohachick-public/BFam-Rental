@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Auth0Root } from './components/Auth0Root'
 import { Layout } from './components/Layout'
-import { AuthProvider } from './context/AuthContext'
+import { AdminSessionProvider } from './context/AdminSessionContext'
 import { CatalogPage } from './pages/CatalogPage'
 import { HomePage } from './pages/HomePage'
 import { ItemDetailPage } from './pages/ItemDetailPage'
@@ -13,7 +13,6 @@ import { AdminDeliverySettingsPage } from './pages/admin/AdminDeliverySettingsPa
 import { AdminItemFormPage } from './pages/admin/AdminItemFormPage'
 import { AdminItemsPage } from './pages/admin/AdminItemsPage'
 import { AdminLayout } from './pages/admin/AdminLayout'
-import { AdminLoginPage } from './pages/admin/AdminLoginPage'
 import { BookingSignCompletePage } from './pages/BookingSignCompletePage'
 import { BookingSignPage } from './pages/BookingSignPage'
 import { PaymentSuccessPage } from './pages/PaymentSuccessPage'
@@ -21,7 +20,7 @@ import { PaymentSuccessPage } from './pages/PaymentSuccessPage'
 export default function App() {
   return (
     <Auth0Root>
-      <AuthProvider>
+      <AdminSessionProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Layout />}>
@@ -33,7 +32,7 @@ export default function App() {
               <Route path="booking-actions/:token/complete" element={<BookingSignCompletePage />} />
               <Route path="payment-success" element={<PaymentSuccessPage />} />
             </Route>
-            <Route path="/admin/login" element={<AdminLoginPage />} />
+            <Route path="/admin/login" element={<Navigate to="/admin/items" replace />} />
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<Navigate to="/admin/items" replace />} />
               <Route path="items" element={<AdminItemsPage />} />
@@ -47,7 +46,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
-      </AuthProvider>
+      </AdminSessionProvider>
     </Auth0Root>
   )
 }

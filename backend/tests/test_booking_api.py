@@ -325,7 +325,7 @@ def test_create_booking_missing_license(client, seed_item, seed_day_statuses):
     assert res.status_code in (400, 422)
 
 
-def test_create_booking_towable_requires_tow_vehicle_fields(client, seed_item, seed_day_statuses):
+def test_create_booking_towable_without_tow_rating_succeeds(client, seed_item, seed_day_statuses):
     item = seed_item(towable=True)
     start, end = _future(5), _future(6)
     seed_day_statuses(item["id"], [
@@ -345,14 +345,14 @@ def test_create_booking_towable_requires_tow_vehicle_fields(client, seed_item, s
         "tow_vehicle_year": "2020",
         "tow_vehicle_make": "Ford",
         "tow_vehicle_model": "F-150",
+        "has_brake_controller": "false",
     }
     files = {
         "drivers_license": ("license.jpg", io.BytesIO(jpeg), "image/jpeg"),
         "license_plate": ("plate.jpg", io.BytesIO(jpeg), "image/jpeg"),
     }
     res = client.post("/booking-requests", data=data, files=files)
-    assert res.status_code == 400
-    assert "tow rating" in res.json()["detail"].lower()
+    assert res.status_code == 201
 
 
 def test_create_booking_towable_requires_plate(client, seed_item, seed_day_statuses):
@@ -376,7 +376,6 @@ def test_create_booking_towable_requires_plate(client, seed_item, seed_day_statu
         "tow_vehicle_year": "2020",
         "tow_vehicle_make": "Ford",
         "tow_vehicle_model": "F-150",
-        "tow_vehicle_tow_rating_lbs": "8000",
         "has_brake_controller": "false",
     }
     files = {
@@ -468,7 +467,7 @@ def test_create_booking_multipart_rejected_when_supabase_storage(
     assert "presign" in res.json()["detail"].lower()
 
 
-def test_presign_towable_requires_tow_rating(client, fake_settings, seed_item, seed_day_statuses):
+def test_presign_towable_without_tow_rating_succeeds(client, fake_settings, seed_item, seed_day_statuses):
     fake_settings.booking_documents_storage = "supabase"
     item = seed_item(towable=True)
     start, end = _future(5), _future(6)
@@ -493,8 +492,8 @@ def test_presign_towable_requires_tow_rating(client, fake_settings, seed_item, s
         "tow_vehicle_model": "F-150",
     }
     pre = client.post("/booking-requests/presign", json=body)
-    assert pre.status_code == 400
-    assert "tow rating" in pre.json()["detail"].lower()
+    assert pre.status_code == 201
+    assert pre.json().get("booking_id")
 
 
 def test_presign_and_complete_non_towable(

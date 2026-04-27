@@ -34,6 +34,30 @@ def smtp_configured(settings: Settings) -> bool:
     return bool(settings.smtp_host.strip() and settings.smtp_from.strip())
 
 
+def _parse_email_address(raw: str) -> str | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    if "<" in s and ">" in s:
+        start = s.find("<")
+        end = s.find(">", start + 1)
+        if start >= 0 and end > start:
+            inner = s[start + 1 : end].strip()
+            return inner if "@" in inner else None
+    return s if "@" in s else None
+
+
+def smtp_account_mailbox(settings: Settings) -> str | None:
+    """
+    Best mailbox for contact buttons that should target the configured SMTP account.
+    Prefers SMTP_USER when it looks like an email, else falls back to SMTP_FROM.
+    """
+    user = (settings.smtp_user or "").strip()
+    if "@" in user:
+        return user
+    return _parse_email_address(settings.smtp_from)
+
+
 def _money(d: Decimal) -> str:
     return f"${d:,.2f}"
 
@@ -224,7 +248,7 @@ def send_quote_email(
             f"Rental total (with tax): {_money(rental_total_with_tax)}",
             f"Deposit (hold): {_money(deposit_amount)}",
             "",
-            "This is an estimate. Submit a booking request on the site to proceed.",
+            "This is the amount that will have to be paid before the trailer leaves the lot.",
             *_plain_signature_lines(),
         ]
     )
@@ -239,7 +263,7 @@ def send_quote_email(
 <li>Rental total (with tax): {_money(rental_total_with_tax)}</li>
 <li>Deposit (hold): {_money(deposit_amount)}</li>
 </ul>
-<p>This is an estimate. Submit a booking request on the site to proceed.</p>
+<p>This is the amount that will have to be paid before the trailer leaves the lot.</p>
 {_email_signature_html()}
 </body></html>"""
     try:

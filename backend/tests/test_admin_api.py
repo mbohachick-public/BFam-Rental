@@ -60,6 +60,26 @@ def test_admin_create_item_wrong_token(client, fake_settings):
     assert res.status_code == 401
 
 
+def test_admin_session_ok(client, admin_headers):
+    res = client.get("/admin/session", headers=admin_headers)
+    assert res.status_code == 200
+    assert res.json() == {"admin": True}
+
+
+def test_admin_session_forbidden_without_admin_role(client, fake_settings):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
+    fake_settings.auth0_admin_roles = "admin"
+    fake_settings.auth0_admin_roles_claim = ""
+    fake_settings.auth0_admin_emails = ""
+    with patch(
+        "app.deps.verify_auth0_access_token",
+        return_value={"sub": "auth0|customer", "permissions": ["customer"]},
+    ):
+        res = client.get("/admin/session", headers={"Authorization": "Bearer fake.jwt"})
+    assert res.status_code == 403
+
+
 def test_admin_list_accepts_auth0_bearer_when_role_matches(client, fake_settings):
     fake_settings.auth0_domain = "tenant.auth0.com"
     fake_settings.auth0_audience = "https://api.test/"

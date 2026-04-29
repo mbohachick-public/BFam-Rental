@@ -24,6 +24,12 @@ app.include_router(admin.router)
 app.include_router(stripe_webhook.router)
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    # Render may probe HEAD / during deploy; ensure a 200 response.
+    return {"status": "ok"}
+
+
 @app.exception_handler(httpx.ConnectError)
 async def supabase_unreachable(_request: Request, _exc: httpx.ConnectError) -> JSONResponse:
     """Supabase hostname failed DNS / TCP (bad SUPABASE_URL, offline, typo)."""

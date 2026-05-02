@@ -474,6 +474,20 @@ export function AdminBookingsPage() {
                     </button>
                   </>
                 ) : null}
+                {r.insurance_card_url ? (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      className="doc-link"
+                      onClick={() =>
+                        void openBookingDocument(r.insurance_card_url!, 'insurance card photo')
+                      }
+                    >
+                      Insurance card
+                    </button>
+                  </>
+                ) : null}
               </div>
               <div className="admin-row-actions admin-booking-actions">
                 {isAwaitingSignature(r.status) ? (

@@ -419,6 +419,64 @@ a.btn.btn-primary:hover:not(:disabled) {
   margin-bottom: 1.5rem;
 }
 
+.filters-collapsible {
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+
+.filters-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1.1rem 1.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filters-summary::-webkit-details-marker {
+  display: none;
+}
+
+.filters-summary-title {
+  font-family: Outfit, 'DM Sans', system-ui, sans-serif;
+  font-weight: 700;
+  color: var(--color-brand-green-dark);
+}
+
+.filters-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-brand-green-dark);
+  background: var(--color-brand-tint-12);
+}
+
+.filters-summary-hint {
+  margin-left: auto;
+}
+
+.filters-body {
+  padding: 0 1.35rem 1.25rem;
+  margin-bottom: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.filters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.filters-collapsible[open] .filters-summary {
+  padding-bottom: 0.85rem;
+}
+
 .filters-grid {
   display: grid;
   gap: 1rem;

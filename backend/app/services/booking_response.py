@@ -39,9 +39,9 @@ def booking_out_from_row(
     decline_email_sent: bool | None = None,
     signing_url: str | None = None,
 ) -> BookingRequestOut:
-    dl_url = lp_url = None
+    dl_url = lp_url = ins_url = None
     if sign_document_urls:
-        dl_url, lp_url = admin_document_view_urls(get_settings(), client, row)
+        dl_url, lp_url, ins_url = admin_document_view_urls(get_settings(), client, row)
     hb = row.get("has_brake_controller")
     has_brake = bool(hb) if hb is not None else None
     return BookingRequestOut(
@@ -68,6 +68,7 @@ def booking_out_from_row(
         sales_tax_source=row.get("sales_tax_source"),
         drivers_license_url=dl_url,
         license_plate_url=lp_url,
+        insurance_card_url=ins_url,
         decline_email_sent=decline_email_sent,
         company_name=_str_opt(row.get("company_name")),
         delivery_address=_str_opt(row.get("delivery_address")),

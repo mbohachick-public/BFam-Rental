@@ -157,6 +157,7 @@ class BookingPresignRequest(BookingContactForm):
     notes: str | None = None
     drivers_license_content_type: str = Field(..., min_length=3, max_length=80)
     license_plate_content_type: str | None = Field(default=None, max_length=80)
+    insurance_card_content_type: str | None = Field(default=None, max_length=80)
     company_name: str | None = Field(default=None, max_length=200)
     is_repeat_contractor: bool = False
     tow_vehicle_year: int | None = Field(default=None, ge=1950, le=2100)
@@ -186,6 +187,7 @@ class BookingPresignResponse(BaseModel):
     booking_id: str
     drivers_license: BookingUploadSlot
     license_plate: BookingUploadSlot | None = None
+    insurance_card: BookingUploadSlot | None = None
     expires_in: int
 
 
@@ -196,6 +198,7 @@ class BookingCompleteBody(BaseModel):
 
     drivers_license_path: str = Field(..., min_length=8, max_length=500)
     license_plate_path: str | None = Field(default=None, max_length=500)
+    insurance_card_path: str | None = Field(default=None, max_length=500)
 
 
 class BookingDeclineBody(BaseModel):
@@ -258,6 +261,7 @@ class BookingRequestOut(BaseModel):
     sales_tax_source: str | None = None
     drivers_license_url: str | None = None
     license_plate_url: str | None = None
+    insurance_card_url: str | None = None
     decline_email_sent: bool | None = None
     company_name: str | None = None
     delivery_address: str | None = None

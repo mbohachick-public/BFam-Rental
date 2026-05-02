@@ -129,6 +129,7 @@ export interface BookingPresignResponse {
   booking_id: string
   drivers_license: BookingUploadSlot
   license_plate: BookingUploadSlot | null
+  insurance_card?: BookingUploadSlot | null
   expires_in: number
 }
 
@@ -158,6 +159,7 @@ export interface BookingRequestOut {
   sales_tax_source?: string | null
   drivers_license_url?: string | null
   license_plate_url?: string | null
+  insurance_card_url?: string | null
   company_name?: string | null
   delivery_address?: string | null
   delivery_requested?: boolean | null

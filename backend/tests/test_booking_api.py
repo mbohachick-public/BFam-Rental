@@ -325,7 +325,10 @@ def test_create_booking_missing_license(client, seed_item, seed_day_statuses):
     assert res.status_code in (400, 422)
 
 
-def test_create_booking_towable_without_tow_rating_succeeds(client, seed_item, seed_day_statuses):
+def test_create_booking_towable_without_tow_vehicle_fields_succeeds(
+    client, seed_item, seed_day_statuses
+):
+    """Towable bookings no longer collect year/make/model on the customer form."""
     item = seed_item(towable=True)
     start, end = _future(5), _future(6)
     seed_day_statuses(item["id"], [
@@ -342,10 +345,6 @@ def test_create_booking_towable_without_tow_rating_succeeds(client, seed_item, s
         "customer_first_name": "Tow",
         "customer_last_name": "Two",
         "customer_address": "789 St",
-        "tow_vehicle_year": "2020",
-        "tow_vehicle_make": "Ford",
-        "tow_vehicle_model": "F-150",
-        "has_brake_controller": "false",
     }
     files = {
         "drivers_license": ("license.jpg", io.BytesIO(jpeg), "image/jpeg"),
@@ -373,10 +372,6 @@ def test_create_booking_towable_requires_plate(client, seed_item, seed_day_statu
         "customer_first_name": "Tow",
         "customer_last_name": "User",
         "customer_address": "789 St",
-        "tow_vehicle_year": "2020",
-        "tow_vehicle_make": "Ford",
-        "tow_vehicle_model": "F-150",
-        "has_brake_controller": "false",
     }
     files = {
         "drivers_license": ("license.jpg", io.BytesIO(jpeg), "image/jpeg"),
@@ -467,7 +462,9 @@ def test_create_booking_multipart_rejected_when_supabase_storage(
     assert "presign" in res.json()["detail"].lower()
 
 
-def test_presign_towable_without_tow_rating_succeeds(client, fake_settings, seed_item, seed_day_statuses):
+def test_presign_towable_without_tow_vehicle_fields_succeeds(
+    client, fake_settings, seed_item, seed_day_statuses
+):
     fake_settings.booking_documents_storage = "supabase"
     item = seed_item(towable=True)
     start, end = _future(5), _future(6)
@@ -487,9 +484,6 @@ def test_presign_towable_without_tow_rating_succeeds(client, fake_settings, seed
         "drivers_license_content_type": "image/jpeg",
         "license_plate_content_type": "image/jpeg",
         "request_not_confirmed_ack": True,
-        "tow_vehicle_year": 2020,
-        "tow_vehicle_make": "Ford",
-        "tow_vehicle_model": "F-150",
     }
     pre = client.post("/booking-requests/presign", json=body)
     assert pre.status_code == 201

@@ -62,7 +62,7 @@ def assert_booking_document_path(
     booking_id: str,
     path: str,
     *,
-    role: Literal["drivers_license", "license_plate"],
+    role: Literal["drivers_license", "license_plate", "insurance_card"],
 ) -> None:
     """Reject path traversal and wrong object names for a booking."""
     norm = path.replace("\\", "/").strip()
@@ -74,6 +74,8 @@ def assert_booking_document_path(
         raise ValueError("Driver license path must use the name from the presign response.")
     if role == "license_plate" and not base.startswith("license_plate"):
         raise ValueError("License plate path must use the name from the presign response.")
+    if role == "insurance_card" and not base.startswith("insurance_card"):
+        raise ValueError("Insurance card path must use the name from the presign response.")
 
 
 def verify_booking_document_uploaded(client: Client, path: str, label: str) -> None:
@@ -138,20 +140,25 @@ def save_booking_document(
     _supabase_upload(client, object_path, data, content_type)
 
 
-def admin_document_view_urls(settings: Settings, client: Client, row: dict) -> tuple[str | None, str | None]:
+def admin_document_view_urls(
+    settings: Settings, client: Client, row: dict
+) -> tuple[str | None, str | None, str | None]:
     """URLs for admin to open documents (browser-friendly)."""
     rid = row["id"]
     dl_p = row.get("drivers_license_path")
     lp_p = row.get("license_plate_path")
+    ins_p = row.get("insurance_card_path")
     base = settings.api_public_url.rstrip("/")
     if settings.booking_documents_storage == "local":
         return (
             f"{base}/admin/booking-requests/{rid}/files/drivers-license" if dl_p else None,
             f"{base}/admin/booking-requests/{rid}/files/license-plate" if lp_p else None,
+            f"{base}/admin/booking-requests/{rid}/files/insurance-card" if ins_p else None,
         )
     return (
         _supabase_signed_url(client, dl_p) if dl_p else None,
         _supabase_signed_url(client, lp_p) if lp_p else None,
+        _supabase_signed_url(client, ins_p) if ins_p else None,
     )
 
 
@@ -191,6 +198,8 @@ def admin_booking_file_response(
         col = "drivers_license_path"
     elif file_key == "license-plate":
         col = "license_plate_path"
+    elif file_key == "insurance-card":
+        col = "insurance_card_path"
     else:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown file")
 

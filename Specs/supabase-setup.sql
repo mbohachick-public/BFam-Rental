@@ -147,6 +147,7 @@ create table public.booking_requests (
   sales_tax_source text,
   drivers_license_path text,
   license_plate_path text,
+  insurance_card_path text,
   created_at timestamptz not null default now(),
   company_name text,
   delivery_address text,

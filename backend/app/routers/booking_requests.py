@@ -169,36 +169,6 @@ def _workflow_from_presign(body: BookingPresignRequest) -> dict:
     }
 
 
-def _validate_tow_vehicle_fields_for_towable(
-    *,
-    towable: bool,
-    tow_vehicle_year: int | None,
-    tow_vehicle_make: str | None,
-    tow_vehicle_model: str | None,
-) -> None:
-    if not towable:
-        return
-    if tow_vehicle_year is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tow vehicle year is required for towable pickup rentals.",
-        )
-    if not (tow_vehicle_make or "").strip() or not (tow_vehicle_model or "").strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tow vehicle make and model are required for towable pickup rentals.",
-        )
-
-
-def _validate_tow_vehicle_for_towable(body: BookingPresignRequest, *, towable: bool) -> None:
-    _validate_tow_vehicle_fields_for_towable(
-        towable=towable,
-        tow_vehicle_year=body.tow_vehicle_year,
-        tow_vehicle_make=body.tow_vehicle_make,
-        tow_vehicle_model=body.tow_vehicle_model,
-    )
-
-
 def _validated_booking_insert_row(
     client: Client,
     settings,
@@ -532,6 +502,14 @@ def presign_booking_uploads(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
+    ins_ct_raw = (body.insurance_card_content_type or "").strip()
+    ins_type_norm = None
+    if ins_ct_raw:
+        try:
+            ins_type_norm = normalize_booking_image_content_type(ins_ct_raw, "Insurance card")
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
     insert_row, _item_title, towable, _num_days, _disc_sub, _tax_rate, _tax_amt, _rental_w_tax, _tax_src, _dep = (
         _validated_booking_insert_row(
             client,
@@ -547,7 +525,6 @@ def presign_booking_uploads(
         )
     )
     insert_row.update(_workflow_from_presign(body))
-    _validate_tow_vehicle_for_towable(body, towable=towable)
     if towable and lp_type_norm is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -571,6 +548,7 @@ def presign_booking_uploads(
     path_dl = f"{bid}/drivers_license{dl_ext}"
     dl_slot_out: BookingUploadSlot
     lp_slot_out: BookingUploadSlot | None = None
+    ins_slot_out: BookingUploadSlot | None = None
     try:
         dl_slot_raw = create_presigned_booking_upload_slot(client, path_dl)
         dl_slot_out = BookingUploadSlot.model_validate(dl_slot_raw)
@@ -579,6 +557,11 @@ def presign_booking_uploads(
             path_lp = f"{bid}/license_plate{lp_ext}"
             lp_slot_raw = create_presigned_booking_upload_slot(client, path_lp)
             lp_slot_out = BookingUploadSlot.model_validate(lp_slot_raw)
+        if ins_type_norm is not None:
+            ins_ext = ext_for_content_type(ins_type_norm)
+            path_ins = f"{bid}/insurance_card{ins_ext}"
+            ins_slot_raw = create_presigned_booking_upload_slot(client, path_ins)
+            ins_slot_out = BookingUploadSlot.model_validate(ins_slot_raw)
     except Exception as exc:
         try:
             client.table("booking_requests").delete().eq("id", bid).execute()
@@ -594,6 +577,7 @@ def presign_booking_uploads(
         booking_id=bid,
         drivers_license=dl_slot_out,
         license_plate=lp_slot_out,
+        insurance_card=ins_slot_out,
         expires_in=BOOKING_UPLOAD_PRESIGN_EXPIRES_SEC,
     )
 
@@ -646,6 +630,7 @@ def complete_booking_uploads(
     towable = bool(it_rows[0].get("towable")) if it_rows else False
 
     path_lp: str | None = None
+    path_ins: str | None = None
     try:
         assert_booking_document_path(booking_id, body.drivers_license_path, role="drivers_license")
         verify_booking_document_uploaded(client, body.drivers_license_path, "Driver's license")
@@ -663,11 +648,19 @@ def complete_booking_uploads(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="license_plate_path is not allowed for non-towable items.",
             )
+        if body.insurance_card_path:
+            assert_booking_document_path(booking_id, body.insurance_card_path, role="insurance_card")
+            verify_booking_document_uploaded(client, body.insurance_card_path, "Insurance card")
+            path_ins = body.insurance_card_path
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     client.table("booking_requests").update(
-        {"drivers_license_path": body.drivers_license_path, "license_plate_path": path_lp}
+        {
+            "drivers_license_path": body.drivers_license_path,
+            "license_plate_path": path_lp,
+            "insurance_card_path": path_ins,
+        }
     ).eq("id", booking_id).execute()
 
     res2 = client.table("booking_requests").select("*").eq("id", booking_id).limit(1).execute()
@@ -734,6 +727,7 @@ def create_booking_request(
     has_brake_controller: str | None = Form(default=None),
     drivers_license: UploadFile = File(),
     license_plate: UploadFile | None = File(default=None),
+    insurance_card: UploadFile | None = File(default=None),
     client: Client = Depends(get_supabase_client),
 ) -> BookingRequestOut:
     """Multipart booking create (use when BOOKING_DOCUMENTS_STORAGE=local)."""
@@ -787,12 +781,6 @@ def create_booking_request(
     )
     brake_raw = str(has_brake_controller or "").strip().lower()
     has_brake = brake_raw in ("1", "true", "on", "yes")
-    _validate_tow_vehicle_fields_for_towable(
-        towable=towable,
-        tow_vehicle_year=tow_vehicle_year,
-        tow_vehicle_make=tow_vehicle_make,
-        tow_vehicle_model=tow_vehicle_model,
-    )
     if towable:
         insert_row["tow_vehicle_year"] = tow_vehicle_year
         insert_row["tow_vehicle_make"] = (tow_vehicle_make or "").strip() or None
@@ -851,8 +839,23 @@ def create_booking_request(
             path_lp_val = f"{bid}/license_plate{lp_ext}"
             save_booking_document(settings, client, path_lp_val, lp_raw, lp_type)
 
+        path_ins_val = None
+        if insurance_card is not None and insurance_card.filename:
+            ins_raw, ins_ct = _read_upload(insurance_card)
+            try:
+                ins_type = validate_image_upload(ins_ct, len(ins_raw), "Insurance card")
+            except ValueError as e:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            ins_ext = ext_for_content_type(ins_type)
+            path_ins_val = f"{bid}/insurance_card{ins_ext}"
+            save_booking_document(settings, client, path_ins_val, ins_raw, ins_type)
+
         client.table("booking_requests").update(
-            {"drivers_license_path": path_dl, "license_plate_path": path_lp_val}
+            {
+                "drivers_license_path": path_dl,
+                "license_plate_path": path_lp_val,
+                "insurance_card_path": path_ins_val,
+            }
         ).eq("id", bid).execute()
     except HTTPException:
         client.table("booking_requests").delete().eq("id", bid).execute()

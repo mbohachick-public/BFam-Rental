@@ -214,6 +214,18 @@ export function AdminBookingDetailPage() {
                   </button>
                 </>
               ) : null}
+              {row.insurance_card_url ? (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="doc-link"
+                    onClick={() => void openBookingDocument(row.insurance_card_url!, 'insurance card photo')}
+                  >
+                    Insurance card
+                  </button>
+                </>
+              ) : null}
             </p>
           </section>
 

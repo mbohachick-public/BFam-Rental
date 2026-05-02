@@ -50,10 +50,6 @@ export function ItemDetailPage() {
   const [taxZip, setTaxZip] = useState('')
   const [notes, setNotes] = useState('')
   const [companyName, setCompanyName] = useState('')
-  const [towYear, setTowYear] = useState('')
-  const [towMake, setTowMake] = useState('')
-  const [towModel, setTowModel] = useState('')
-  const [hasBrakeController, setHasBrakeController] = useState(false)
   const [requestAck, setRequestAck] = useState(false)
   const [deliveryRequested, setDeliveryRequested] = useState(false)
   const [deliveryAddress, setDeliveryAddress] = useState('')
@@ -64,6 +60,7 @@ export function ItemDetailPage() {
   const [submitOk, setSubmitOk] = useState<string | null>(null)
   const [driversLicenseFile, setDriversLicenseFile] = useState<File | null>(null)
   const [licensePlateFile, setLicensePlateFile] = useState<File | null>(null)
+  const [insuranceCardFile, setInsuranceCardFile] = useState<File | null>(null)
   const [activeImageIdx, setActiveImageIdx] = useState(0)
 
   const sortedImages = useMemo(
@@ -74,16 +71,13 @@ export function ItemDetailPage() {
   useEffect(() => {
     setDriversLicenseFile(null)
     setLicensePlateFile(null)
+    setInsuranceCardFile(null)
     setFirstName('')
     setLastName('')
     setAddress('')
     setTaxZip('')
     setActiveImageIdx(0)
     setCompanyName('')
-    setTowYear('')
-    setTowMake('')
-    setTowModel('')
-    setHasBrakeController(false)
     setRequestAck(false)
     setDeliveryRequested(false)
     setDeliveryAddress('')
@@ -237,21 +231,6 @@ export function ItemDetailPage() {
       setQuoteError('Delivery address is required when delivery is requested.')
       return
     }
-    if (item.towable) {
-      const y = parseInt(towYear, 10)
-      if (!towYear.trim() || !Number.isFinite(y)) {
-        setQuoteError('Tow vehicle year is required for towable pickup rentals.')
-        return
-      }
-      if (y < 1950 || y > 2100) {
-        setQuoteError('Tow vehicle year must be between 1950 and 2100.')
-        return
-      }
-      if (!towMake.trim() || !towModel.trim()) {
-        setQuoteError('Tow vehicle make and model are required for towable pickup rentals.')
-        return
-      }
-    }
     setSubmitting(true)
     setSubmitOk(null)
     setQuoteError(null)
@@ -270,15 +249,12 @@ export function ItemDetailPage() {
       if (item.towable && licensePlateFile) {
         fd.append('license_plate', licensePlateFile)
       }
+      if (insuranceCardFile) {
+        fd.append('insurance_card', insuranceCardFile)
+      }
       if (item.delivery_available && deliveryRequested) {
         fd.append('delivery_requested', 'true')
         fd.append('delivery_address', deliveryAddress.trim())
-      }
-      if (item.towable) {
-        fd.append('tow_vehicle_year', String(parseInt(towYear, 10)))
-        fd.append('tow_vehicle_make', towMake.trim())
-        fd.append('tow_vehicle_model', towModel.trim())
-        fd.append('has_brake_controller', hasBrakeController ? 'true' : 'false')
       }
       await apiPostFormData('/booking-requests', fd)
     }
@@ -286,6 +262,7 @@ export function ItemDetailPage() {
       const dlType = driversLicenseFile.type || 'image/jpeg'
       const lpType =
         item.towable && licensePlateFile ? licensePlateFile.type || 'image/jpeg' : undefined
+      const insType = insuranceCardFile ? insuranceCardFile.type || 'image/jpeg' : undefined
       const presignBody: Record<string, unknown> = {
         item_id: id,
         start_date: startDate,
@@ -298,14 +275,9 @@ export function ItemDetailPage() {
         notes: notes.trim() || undefined,
         drivers_license_content_type: dlType,
         license_plate_content_type: lpType,
+        insurance_card_content_type: insType,
         request_not_confirmed_ack: true,
         company_name: companyName.trim() || undefined,
-      }
-      if (item.towable) {
-        presignBody.tow_vehicle_year = parseInt(towYear, 10)
-        presignBody.tow_vehicle_make = towMake.trim()
-        presignBody.tow_vehicle_model = towModel.trim()
-        presignBody.has_brake_controller = hasBrakeController
       }
       if (item.delivery_available) {
         presignBody.delivery_requested = deliveryRequested
@@ -322,9 +294,17 @@ export function ItemDetailPage() {
               lpType || 'image/jpeg',
             )
           }
+          if (pre.insurance_card && insuranceCardFile) {
+            await uploadBookingFileToSignedUrl(
+              pre.insurance_card.signed_url,
+              insuranceCardFile,
+              insType || 'image/jpeg',
+            )
+          }
           await apiPost<BookingRequestOut>(`/booking-requests/${pre.booking_id}/complete`, {
             drivers_license_path: pre.drivers_license.path,
             license_plate_path: pre.license_plate?.path ?? null,
+            insurance_card_path: pre.insurance_card?.path ?? null,
           })
         } catch (stepErr) {
           try {
@@ -348,6 +328,7 @@ export function ItemDetailPage() {
       setQuote(null)
       setDriversLicenseFile(null)
       setLicensePlateFile(null)
+      setInsuranceCardFile(null)
     } catch (e) {
       setQuoteError(e instanceof Error ? e.message : 'Submit failed')
     } finally {
@@ -377,16 +358,6 @@ export function ItemDetailPage() {
 
   const mainImage =
     sortedImages.length > 0 ? sortedImages[displayImageIdx]?.url : item.image_urls[0]
-
-  const towY = parseInt(towYear, 10)
-  const towBookingFieldsIncomplete =
-    item.towable &&
-    (!towYear.trim() ||
-      !towMake.trim() ||
-      !towModel.trim() ||
-      !Number.isFinite(towY) ||
-      towY < 1950 ||
-      towY > 2100)
 
   return (
     <div className="container page-item">
@@ -527,6 +498,14 @@ export function ItemDetailPage() {
               onChange={(e) => setDriversLicenseFile(e.target.files?.[0] ?? null)}
             />
           </label>
+          <label className="field field-span">
+            <span className="field-label">Insurance card photo (optional)</span>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(e) => setInsuranceCardFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
           {item.towable && (
             <label className="field field-span">
               <span className="field-label">License plate photo (required for towable)</span>
@@ -656,48 +635,6 @@ export function ItemDetailPage() {
               autoComplete="section-booking organization"
             />
           </label>
-          {item.towable ? (
-            <>
-              <label className="field">
-                <span className="field-label">Tow vehicle year (required)</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={1950}
-                  max={2100}
-                  required
-                  value={towYear}
-                  onChange={(e) => setTowYear(e.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">Tow vehicle make (required)</span>
-                <input
-                  type="text"
-                  required
-                  value={towMake}
-                  onChange={(e) => setTowMake(e.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">Tow vehicle model (required)</span>
-                <input
-                  type="text"
-                  required
-                  value={towModel}
-                  onChange={(e) => setTowModel(e.target.value)}
-                />
-              </label>
-              <label className="field field-checkbox field-span">
-                <input
-                  type="checkbox"
-                  checked={hasBrakeController}
-                  onChange={(e) => setHasBrakeController(e.target.checked)}
-                />
-                <span>Brake controller installed on tow vehicle</span>
-              </label>
-            </>
-          ) : null}
           <label className="field field-checkbox field-span">
             <input
               type="checkbox"
@@ -772,8 +709,7 @@ export function ItemDetailPage() {
               !lastName.trim() ||
               !address.trim() ||
               !requestAck ||
-              (item.delivery_available && deliveryRequested && !deliveryAddress.trim()) ||
-              towBookingFieldsIncomplete
+              (item.delivery_available && deliveryRequested && !deliveryAddress.trim())
             }
           >
             {submitting ? 'Sending…' : 'Submit Booking'}

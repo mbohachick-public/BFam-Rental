@@ -1,8 +1,9 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
+import logging
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import ValidationError
 from supabase import Client
 
@@ -67,6 +68,69 @@ from app.services.quote_email import (
 from app.services.stripe_customer_setup import create_booking_setup_intent, stripe_payment_collection_enabled
 
 router = APIRouter(prefix="/booking-requests", tags=["booking-requests"])
+
+log = logging.getLogger(__name__)
+
+
+def _rental_days_inclusive_or_400(start: date, end: date) -> list[date]:
+    """Inclusive rental day list; 400 if end is before start (``iter_days_inclusive`` is then empty)."""
+    days = iter_days_inclusive(start, end)
+    if not days:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="End date must be on or after start date.",
+        )
+    return days
+
+
+def _dispatch_booking_intake_emails(
+    *,
+    to_addr: str,
+    item_title: str,
+    start_date_iso: str,
+    end_date_iso: str,
+    complete_url: str,
+    num_days: int,
+    discounted_subtotal: Decimal,
+    sales_tax_rate_percent: Decimal,
+    sales_tax_amount: Decimal,
+    rental_total_with_tax: Decimal,
+    deposit_amount: Decimal,
+    delivery_fee: Decimal,
+    pickup_fee: Decimal,
+    delivery_distance_miles: Decimal | None,
+    pickup_distance_miles: Decimal | None,
+) -> None:
+    """Run after HTTP response so SMTP slowness does not block step-1 submit."""
+    try:
+        settings = get_settings()
+        send_booking_intake_continue_email(
+            settings,
+            to_addr=to_addr,
+            item_title=item_title,
+            start_date=start_date_iso,
+            end_date=end_date_iso,
+            complete_url=complete_url,
+        )
+        send_quote_email(
+            settings,
+            to_addr=to_addr,
+            item_title=item_title,
+            start_date=start_date_iso,
+            end_date=end_date_iso,
+            num_days=num_days,
+            discounted_subtotal=discounted_subtotal,
+            sales_tax_rate_percent=sales_tax_rate_percent,
+            sales_tax_amount=sales_tax_amount,
+            rental_total_with_tax=rental_total_with_tax,
+            deposit_amount=deposit_amount,
+            delivery_fee=delivery_fee,
+            pickup_fee=pickup_fee,
+            delivery_distance_miles=delivery_distance_miles,
+            pickup_distance_miles=pickup_distance_miles,
+        )
+    except Exception:
+        log.exception("Booking intake follow-up emails failed (to=%s)", to_addr)
 
 
 def _upsert_booking_date_hold(client: Client, item_id: str, start_date: date, end_date: date) -> None:
@@ -246,7 +310,7 @@ def _validated_booking_insert_row(
     deposit = _decimal(item["deposit_amount"])
 
     today = _today_utc()
-    days = iter_days_inclusive(start_date, end_date)
+    days = _rental_days_inclusive_or_400(start_date, end_date)
 
     ensure_booking_window_day_status(client, item_id, today)
     status_res = (
@@ -373,7 +437,7 @@ def _intake_booking_insert_row(
     deposit = _decimal(item["deposit_amount"])
 
     today = _today_utc()
-    days = iter_days_inclusive(body.start_date, body.end_date)
+    days = _rental_days_inclusive_or_400(body.start_date, body.end_date)
 
     ensure_booking_window_day_status(client, body.item_id, today)
     status_res = (
@@ -529,6 +593,7 @@ def _booking_store_error_detail(settings) -> str:
 @router.post("/intake", response_model=BookingIntakeOut, status_code=status.HTTP_201_CREATED)
 def create_booking_intake(
     body: BookingIntakeCreate,
+    background_tasks: BackgroundTasks,
     customer: dict | None = Depends(customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingIntakeOut:
@@ -550,21 +615,15 @@ def create_booking_intake(
     complete_url = f"{base_fe}/booking/{bid}/complete"
     em = str(body.customer_email).strip()
     if em:
-        send_booking_intake_continue_email(
-            settings,
+        num_days = len(iter_days_inclusive(body.start_date, body.end_date))
+        background_tasks.add_task(
+            _dispatch_booking_intake_emails,
             to_addr=em,
             item_title=item_title,
-            start_date=str(body.start_date),
-            end_date=str(body.end_date),
+            start_date_iso=body.start_date.isoformat(),
+            end_date_iso=body.end_date.isoformat(),
             complete_url=complete_url,
-        )
-        send_quote_email(
-            settings,
-            to_addr=em,
-            item_title=item_title,
-            start_date=body.start_date.isoformat(),
-            end_date=body.end_date.isoformat(),
-            num_days=len(iter_days_inclusive(body.start_date, body.end_date)),
+            num_days=num_days,
             discounted_subtotal=_decimal(insert_row["discounted_subtotal"]),
             sales_tax_rate_percent=_decimal(insert_row["sales_tax_rate_percent"]),
             sales_tax_amount=_decimal(insert_row["sales_tax_amount"]),
@@ -1586,7 +1645,7 @@ def quote_booking(
     deposit = _decimal(item["deposit_amount"])
 
     today = _today_utc()
-    days = iter_days_inclusive(body.start_date, body.end_date)
+    days = _rental_days_inclusive_or_400(body.start_date, body.end_date)
     ensure_booking_window_day_status(client, body.item_id, today)
     status_res = (
         client.table("item_day_status")

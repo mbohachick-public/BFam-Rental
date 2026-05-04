@@ -59,6 +59,27 @@ def test_quote_returns_pricing(client, seed_item, seed_day_statuses):
     assert body.get("delivery_distance_miles") in (None, 0, "0")
 
 
+def test_quote_rejects_end_before_start(client, seed_item, seed_day_statuses):
+    item = seed_item(cost_per_day=100.0, minimum_day_rental=1)
+    start, end = _future(7), _future(5)
+    seed_day_statuses(item["id"], [
+        (start, "open_for_booking"),
+        (end, "open_for_booking"),
+    ])
+    res = client.post(
+        "/booking-requests/quote",
+        json={
+            "item_id": item["id"],
+            "start_date": start,
+            "end_date": end,
+            "customer_email": "badrange@test.com",
+            "customer_address": QUOTE_CUSTOMER_ADDRESS,
+        },
+    )
+    assert res.status_code == 400
+    assert "on or after start" in (res.json().get("detail") or "").lower()
+
+
 def test_quote_with_delivery_adds_fee_and_tax_on_subtotal(
     client, seed_item, seed_day_statuses, fake_settings, db_store, monkeypatch
 ):

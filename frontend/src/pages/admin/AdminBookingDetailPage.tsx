@@ -35,6 +35,19 @@ function text(v: string | null | undefined): string {
   return t || '—'
 }
 
+function fmtTimestamp(v: string | null | undefined): string {
+  const t = (v ?? '').trim()
+  if (!t) return '—'
+  const d = new Date(t)
+  return Number.isNaN(d.getTime()) ? t : d.toLocaleString()
+}
+
+function truncateStripeRef(id: string | null | undefined, max = 24): string {
+  const s = (id ?? '').trim()
+  if (!s) return '—'
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
@@ -53,7 +66,10 @@ export function AdminBookingDetailPage() {
   const load = useCallback(() => {
     if (!adminApiReady || !id) return
     adminGet<BookingRequestOut>(`/admin/booking-requests/${encodeURIComponent(id)}`)
-      .then(setRow)
+      .then((data) => {
+        setError(null)
+        setRow(data)
+      })
       .catch((e: Error) => {
         setRow(null)
         setError(e.message)
@@ -61,7 +77,6 @@ export function AdminBookingDetailPage() {
   }, [adminApiReady, id])
 
   useEffect(() => {
-    setError(null)
     load()
   }, [load])
 
@@ -131,14 +146,21 @@ export function AdminBookingDetailPage() {
           </section>
 
           <section className="card card-pad section-block">
-            <h2>Delivery</h2>
+            <h2>Logistics</h2>
             <dl className="attr-list">
-              <DetailRow label="Delivery requested">{yesNo(row.delivery_requested)}</DetailRow>
-              <DetailRow label="Delivery address">{text(row.delivery_address)}</DetailRow>
-              <DetailRow label="Delivery fee (computed)">{money(row.delivery_fee)}</DetailRow>
+              <DetailRow label="Delivery to site">{yesNo(row.delivery_requested)}</DetailRow>
+              <DetailRow label="Pickup from site after rental">{yesNo(row.pickup_from_site_requested)}</DetailRow>
+              <DetailRow label="Job site address">{text(row.delivery_address)}</DetailRow>
+              <DetailRow label="Delivery fee (estimated)">{money(row.delivery_fee)}</DetailRow>
+              <DetailRow label="Pickup fee (estimated)">{money(row.pickup_fee)}</DetailRow>
               <DetailRow label="Delivery distance (miles)">
                 {row.delivery_distance_miles != null && String(row.delivery_distance_miles).trim() !== ''
                   ? String(row.delivery_distance_miles)
+                  : '—'}
+              </DetailRow>
+              <DetailRow label="Pickup distance (miles)">
+                {row.pickup_distance_miles != null && String(row.pickup_distance_miles).trim() !== ''
+                  ? String(row.pickup_distance_miles)
                   : '—'}
               </DetailRow>
             </dl>
@@ -171,6 +193,30 @@ export function AdminBookingDetailPage() {
               <DetailRow label="Understood request is not confirmed until approved">
                 {yesNo(row.request_not_confirmed_ack)}
               </DetailRow>
+            </dl>
+          </section>
+
+          <section className="card card-pad section-block">
+            <h2>Verification (Step 2)</h2>
+            <dl className="attr-list">
+              <DetailRow label="Submitted at">{fmtTimestamp(row.verification_submitted_at)}</DetailRow>
+              <DetailRow label="Request subject to approval (Step 2)">{yesNo(row.request_approval_acknowledged)}</DetailRow>
+              <DetailRow label="Intent to review/sign agreement if approved">{yesNo(row.agreement_sign_intent_acknowledged)}</DetailRow>
+              <DetailRow label="Legacy terms flag">{yesNo(row.agreement_terms_acknowledged)}</DetailRow>
+              <DetailRow label="Tow vehicle confirmation">{yesNo(row.vehicle_tow_capable_ack)}</DetailRow>
+              <DetailRow label="Damage waiver selected">{yesNo(row.damage_waiver_selected)}</DetailRow>
+              <DetailRow label="Damage waiver (daily / line total)">
+                {row.damage_waiver_daily_amount || row.damage_waiver_line_total
+                  ? `${money(row.damage_waiver_daily_amount)} / ${money(row.damage_waiver_line_total)}`
+                  : '—'}
+              </DetailRow>
+              <DetailRow label="Rental subtotal (snapshot from Step 2)">
+                {money(row.rental_subtotal_snapshot)}
+              </DetailRow>
+              <DetailRow label="Saved payment method ref">
+                <code>{truncateStripeRef(row.stripe_saved_payment_method_id)}</code>
+              </DetailRow>
+              <DetailRow label="Deposit authorization">{text(row.deposit_authorization_status)}</DetailRow>
             </dl>
           </section>
 

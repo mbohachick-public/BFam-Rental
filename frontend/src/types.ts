@@ -8,6 +8,7 @@ export type DayStatus =
 export type BookingRequestStatus =
   | 'pending'
   | 'requested'
+  | 'pending_approval'
   | 'under_review'
   | 'approved_awaiting_signature'
   | 'approved_pending_payment'
@@ -25,6 +26,48 @@ export type BookingRequestStatus =
 
 /** Stored on bookings after approve; product uses card (Stripe) only. */
 export type PaymentPath = 'card'
+
+/** Matches backend DepositAuthorizationStatus. */
+export type DepositAuthorizationStatus = 'not_started' | 'authorized' | 'failed' | 'not_required'
+
+/** POST /booking-requests/intake */
+export interface BookingIntakeOut {
+  booking_id: string
+  complete_path: string
+  status: BookingRequestStatus
+}
+
+/** GET /booking-requests/:id/completion-summary */
+export interface BookingCompletionSummaryOut {
+  booking_id: string
+  status: BookingRequestStatus
+  item_title: string
+  start_date: string
+  end_date: string
+  num_days: number
+  towable: boolean
+  delivery_requested: boolean
+  pickup_from_site_requested: boolean
+  discounted_subtotal: string
+  deposit_amount: string
+  rental_total_with_tax: string
+  delivery_fee?: string
+  pickup_fee?: string
+  damage_waiver_daily_amount?: string
+  stripe_payment_collection_enabled: boolean
+  rental_terms_url?: string | null
+  /** Job site when delivery and/or pickup-from-site was selected */
+  logistics_address?: string | null
+  delivery_address?: string | null
+  job_site_address?: string | null
+  /** Customer mailing / billing — collected on Step 1 */
+  customer_address?: string | null
+}
+
+export interface BookingStripeSetupIntentOut {
+  client_secret: string
+  publishable_key: string
+}
 
 export interface ItemImage {
   id: string
@@ -71,7 +114,9 @@ export interface BookingQuote {
   discounted_subtotal: string
   deposit_amount: string
   delivery_fee?: string
+  pickup_fee?: string
   delivery_distance_miles?: string | null
+  pickup_distance_miles?: string | null
   sales_tax_rate_percent: string
   sales_tax_amount: string
   rental_total_with_tax: string
@@ -109,6 +154,13 @@ export interface CustomerBookingSummary {
   stripe_deposit_checkout_url?: string | null
 }
 
+/** GET /booking-requests/mine/:id — customer Auth0 only */
+export interface CustomerBookingDetail extends BookingRequestOut {
+  item_title: string
+  has_executed_contract: boolean
+  item_active?: boolean
+}
+
 /** GET /booking-requests/me/contact */
 export interface CustomerContactProfile {
   customer_email: string
@@ -129,6 +181,12 @@ export interface BookingPresignResponse {
   booking_id: string
   drivers_license: BookingUploadSlot
   license_plate: BookingUploadSlot | null
+  insurance_card?: BookingUploadSlot | null
+  expires_in: number
+}
+
+export interface BookingCompletionPresignOut {
+  drivers_license: BookingUploadSlot
   insurance_card?: BookingUploadSlot | null
   expires_in: number
 }
@@ -163,8 +221,11 @@ export interface BookingRequestOut {
   company_name?: string | null
   delivery_address?: string | null
   delivery_requested?: boolean | null
+  pickup_from_site_requested?: boolean | null
   delivery_fee?: string | null
+  pickup_fee?: string | null
   delivery_distance_miles?: string | null
+  pickup_distance_miles?: string | null
   payment_method_preference?: string | null
   is_repeat_contractor?: boolean | null
   tow_vehicle_year?: number | null
@@ -197,6 +258,17 @@ export interface BookingRequestOut {
   stripe_deposit_checkout_url?: string | null
   stripe_deposit_checkout_created_at?: string | null
   stripe_deposit_payment_intent_id?: string | null
+  agreement_terms_acknowledged?: boolean | null
+  request_approval_acknowledged?: boolean | null
+  agreement_sign_intent_acknowledged?: boolean | null
+  vehicle_tow_capable_ack?: boolean | null
+  damage_waiver_selected?: boolean | null
+  damage_waiver_daily_amount?: string | null
+  damage_waiver_line_total?: string | null
+  rental_subtotal_snapshot?: string | null
+  stripe_saved_payment_method_id?: string | null
+  deposit_authorization_status?: DepositAuthorizationStatus | string | null
+  verification_submitted_at?: string | null
   /** Present on admin approve/resend only — copy to customer. */
   signing_url?: string | null
 }

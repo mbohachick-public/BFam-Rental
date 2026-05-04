@@ -1,4 +1,4 @@
-"""Email admins when booking workflow actions are required (approval or final confirm)."""
+"""Email admins (and one customer completion message) when booking workflow actions are required."""
 
 from __future__ import annotations
 
@@ -11,13 +11,16 @@ from supabase import Client
 from app.branding import LEGAL_BUSINESS_NAME
 from app.config import Settings
 from app.schemas import BookingRequestStatus
+from app.services.booking_confirmation import apply_booking_confirmation
 from app.services.booking_events import log_booking_event
+from app.services.pickup_instructions_email import PICKUP_INSTRUCTIONS_EMAIL_EVENT
 from app.services.quote_email import NO_TRACK_A_ATTR, try_send_email
 
 log = logging.getLogger(__name__)
 
 ADMIN_EMAIL_APPROVAL_EVENT = "admin_email_approval_needed_sent"
 ADMIN_EMAIL_CONFIRM_EVENT = "admin_email_confirm_ready_sent"
+CUSTOMER_BOOKING_COMPLETE_EMAIL_EVENT = "customer_booking_complete_email_sent"
 
 _PRE_CONFIRM_STATUSES = frozenset(
     {
@@ -31,6 +34,7 @@ _APPROVAL_STATUSES = frozenset(
         BookingRequestStatus.requested.value,
         BookingRequestStatus.pending.value,
         BookingRequestStatus.under_review.value,
+        BookingRequestStatus.pending_approval.value,
     }
 )
 
@@ -76,6 +80,10 @@ def _booking_event_exists(client: Client, booking_id: str, event_type: str) -> b
         return False
 
 
+def booking_event_exists(client: Client, booking_id: str, event_type: str) -> bool:
+    return _booking_event_exists(client, booking_id, event_type)
+
+
 def booking_row_ready_for_confirm(row: dict) -> bool:
     """Same gates as admin confirm (without mutating)."""
     st = str(row.get("status") or "")
@@ -95,6 +103,77 @@ def booking_row_ready_for_confirm(row: dict) -> bool:
     if not row.get("agreement_signed_at"):
         return False
     return True
+
+
+def _customer_already_has_fulfillment_guidance(client: Client, booking_id: str, row: dict) -> bool:
+    if _booking_event_exists(client, booking_id, CUSTOMER_BOOKING_COMPLETE_EMAIL_EVENT):
+        return True
+    if not bool(row.get("delivery_requested")) and _booking_event_exists(
+        client, booking_id, PICKUP_INSTRUCTIONS_EMAIL_EVENT
+    ):
+        return True
+    return False
+
+
+def try_finalize_booking_after_obligations_complete(client: Client, settings: Settings, booking_id: str) -> None:
+    """
+    When rental payment + deposit (if required) + agreement are satisfied, confirm the booking on the
+    calendar (idempotent) and send one customer email with fulfillment next steps.
+    """
+    from app.services.quote_email import send_customer_booking_fully_complete_email, smtp_configured
+
+    row = _fetch_booking(client, booking_id)
+    if not row:
+        return
+    if booking_row_ready_for_confirm(row):
+        updated = apply_booking_confirmation(client, row, actor_type="system")
+        if updated:
+            row = updated
+    st = str(row.get("status") or "")
+    if st != BookingRequestStatus.confirmed.value:
+        return
+    if _customer_already_has_fulfillment_guidance(client, booking_id, row):
+        return
+    if not smtp_configured(settings):
+        return
+    em = str(row.get("customer_email") or "").strip()
+    if not em:
+        return
+    item_title = _fetch_item_title(client, str(row["item_id"]))
+    start = str(row.get("start_date") or "")
+    end = str(row.get("end_date") or "")
+    try:
+        rt = Decimal(str(row["rental_total_with_tax"])) if row.get("rental_total_with_tax") is not None else None
+    except Exception:
+        rt = None
+    try:
+        dep = Decimal(str(row["deposit_amount"])) if row.get("deposit_amount") is not None else None
+    except Exception:
+        dep = None
+    fn = row.get("customer_first_name")
+    greet_name = str(fn).strip() if fn else None
+    deliv_addr = row.get("delivery_address")
+    job_site = str(deliv_addr).strip() if deliv_addr else None
+    ok = send_customer_booking_fully_complete_email(
+        settings,
+        to_addr=em,
+        item_title=item_title,
+        start_date=start,
+        end_date=end,
+        rental_total_with_tax=rt,
+        deposit_amount=dep,
+        delivery_requested=bool(row.get("delivery_requested")),
+        pickup_from_site_requested=bool(row.get("pickup_from_site_requested")),
+        delivery_address=job_site,
+        greeting_name=greet_name,
+    )
+    if ok:
+        log_booking_event(
+            client,
+            booking_id=booking_id,
+            event_type=CUSTOMER_BOOKING_COMPLETE_EMAIL_EVENT,
+            actor_type="system",
+        )
 
 
 def _admin_bookings_url(settings: Settings, booking_id: str) -> str:

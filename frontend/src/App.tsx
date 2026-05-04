@@ -5,6 +5,7 @@ import { AdminSessionProvider } from './context/AdminSessionContext'
 import { CatalogPage } from './pages/CatalogPage'
 import { HomePage } from './pages/HomePage'
 import { ItemDetailPage } from './pages/ItemDetailPage'
+import { MyRentalDetailPage } from './pages/MyRentalDetailPage'
 import { MyRentalsPage } from './pages/MyRentalsPage'
 import { AdminAvailabilityPage } from './pages/admin/AdminAvailabilityPage'
 import { AdminBookingDetailPage } from './pages/admin/AdminBookingDetailPage'
@@ -13,6 +14,7 @@ import { AdminDeliverySettingsPage } from './pages/admin/AdminDeliverySettingsPa
 import { AdminItemFormPage } from './pages/admin/AdminItemFormPage'
 import { AdminItemsPage } from './pages/admin/AdminItemsPage'
 import { AdminLayout } from './pages/admin/AdminLayout'
+import { BookingCompletePage } from './pages/BookingCompletePage'
 import { BookingSignCompletePage } from './pages/BookingSignCompletePage'
 import { BookingSignPage } from './pages/BookingSignPage'
 import { PaymentSuccessPage } from './pages/PaymentSuccessPage'
@@ -27,7 +29,9 @@ export default function App() {
               <Route index element={<HomePage />} />
               <Route path="catalog" element={<CatalogPage />} />
               <Route path="items/:id" element={<ItemDetailPage />} />
+              <Route path="booking/:id/complete" element={<BookingCompletePage />} />
               <Route path="my-rentals" element={<MyRentalsPage />} />
+              <Route path="my-rentals/:id" element={<MyRentalDetailPage />} />
               <Route path="booking-actions/:token/sign" element={<BookingSignPage />} />
               <Route path="booking-actions/:token/complete" element={<BookingSignCompletePage />} />
               <Route path="payment-success" element={<PaymentSuccessPage />} />

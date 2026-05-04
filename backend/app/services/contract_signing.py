@@ -12,7 +12,7 @@ from supabase import Client
 
 from app.config import Settings
 from app.schemas import BookingRequestStatus, PaymentPath
-from app.services.admin_notify import try_notify_admin_confirm_needed
+from app.services.admin_notify import try_finalize_booking_after_obligations_complete, try_notify_admin_confirm_needed
 from app.services.booking_events import log_booking_event
 from app.services.contract_pdf import build_executed_packet_pdf, sha256_bytes
 from app.services.contract_render import (
@@ -314,6 +314,7 @@ def complete_customer_signature(
         actor_type="customer",
         metadata={"signer_email": email_for_record},
     )
+    try_finalize_booking_after_obligations_complete(client, settings, booking_id)
     try_notify_admin_confirm_needed(client, settings, booking_id)
     return {
         "ok": True,

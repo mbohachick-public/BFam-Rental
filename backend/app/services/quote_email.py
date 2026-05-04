@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import logging
 import smtplib
+from datetime import date
 from decimal import Decimal
 from email.message import EmailMessage
 
@@ -101,6 +102,72 @@ def try_send_email(
     except Exception as e:
         log.warning("Failed to send email to %s: %s", to_addr, e)
         return False
+
+
+def send_booking_intake_continue_email(
+    settings: Settings,
+    *,
+    to_addr: str,
+    item_title: str,
+    start_date: str,
+    end_date: str,
+    complete_url: str,
+) -> bool:
+    """After Step 1: backup email with completion link."""
+    safe_url = html.escape(complete_url, quote=True)
+    subj = f"{LEGAL_BUSINESS_NAME} — Complete your rental request"
+    plain_lines = [
+        "Thanks — we received your rental request.",
+        f"Equipment: {item_title}",
+        f"Dates: {start_date} → {end_date}",
+        "",
+        "Finish your verification and saved payment step here (bookmark this link):",
+        complete_url,
+        "",
+        "This is still a request — it is NOT confirmed until we review and approve it.",
+        *_plain_signature_lines(),
+    ]
+    html_body = f"""\
+<html><body style="font-family:Arial,sans-serif;color:#0f172a">
+<p><strong>Complete your rental request</strong></p>
+<p>{html.escape(item_title)}<br/>
+{html.escape(start_date)} → {html.escape(end_date)}</p>
+<p><a href="{safe_url}"{NO_TRACK_A_ATTR}>Continue to Step 2</a></p>
+<p>This is still a request — it is not a confirmed reservation until we approve it.</p>
+{_email_signature_html()}
+</body></html>"""
+    return try_send_email(settings, to_addr=to_addr, subject=subj, plain="\n".join(plain_lines), html_body=html_body)
+
+
+def send_booking_pending_review_notice_email(
+    settings: Settings,
+    *,
+    to_addr: str,
+    item_title: str,
+    start_date: str,
+    end_date: str,
+) -> bool:
+    """After Step 2: customer knows request is queued for owner review."""
+    subj = f"{LEGAL_BUSINESS_NAME} — Rental request received for review"
+    plain = "\n".join(
+        [
+            "We received your completed request.",
+            f"Equipment: {item_title}",
+            f"Dates: {start_date} → {end_date}",
+            "",
+            "Our team will review it shortly. Your booking is not confirmed until approved.",
+            *_plain_signature_lines(),
+        ]
+    )
+    html_body = f"""\
+<html><body style="font-family:Arial,sans-serif;color:#0f172a">
+<p><strong>Request submitted for review</strong></p>
+<p>{html.escape(item_title)}<br/>
+{html.escape(start_date)} → {html.escape(end_date)}</p>
+<p>We&apos;ll review your request shortly. Your booking is <strong>not</strong> confirmed until you receive approval from us.</p>
+{_email_signature_html()}
+</body></html>"""
+    return try_send_email(settings, to_addr=to_addr, subject=subj, plain=plain, html_body=html_body)
 
 
 def send_pickup_confirmed_email(
@@ -226,7 +293,9 @@ def send_quote_email(
     rental_total_with_tax: Decimal,
     deposit_amount: Decimal,
     delivery_fee: Decimal = Decimal("0"),
+    pickup_fee: Decimal = Decimal("0"),
     delivery_distance_miles: Decimal | None = None,
+    pickup_distance_miles: Decimal | None = None,
 ) -> bool:
     if not smtp_configured(settings):
         log.info("SMTP not configured; skipping quote email to %s", to_addr)
@@ -242,6 +311,14 @@ def send_quote_email(
         del_lines_plain.append(f"Delivery fee{mi}: {_money(delivery_fee)}")
         del_lines_html.append(
             f"<li>Delivery fee{html.escape(mi)}: {_money(delivery_fee)}</li>"
+        )
+    if pickup_fee and pickup_fee > 0:
+        mi = ""
+        if pickup_distance_miles is not None:
+            mi = f" (~{pickup_distance_miles} mi one-way)"
+        del_lines_plain.append(f"Pickup from site fee{mi}: {_money(pickup_fee)}")
+        del_lines_html.append(
+            f"<li>Pickup from site fee{html.escape(mi)}: {_money(pickup_fee)}</li>"
         )
     plain = "\n".join(
         [
@@ -427,52 +504,194 @@ def send_booking_approved_email(
         return False
 
 
-def send_signature_completed_email(
+def _rental_start_date_long(start_date: str) -> str:
+    try:
+        d = date.fromisoformat(str(start_date)[:10])
+        return d.strftime("%A, %B %d, %Y")
+    except ValueError:
+        return str(start_date)
+
+
+def _fulfillment_next_steps_plain_html(
+    *,
+    start_date: str,
+    delivery_requested: bool,
+    pickup_from_site_requested: bool,
+    delivery_address: str | None,
+) -> tuple[list[str], str]:
+    """Paragraphs for how the customer gets / returns equipment (plain lines + one HTML block)."""
+    esc_coord = html.escape(RENTAL_COORDINATION_EMAIL)
+    addr_clean = (delivery_address or "").strip()
+    esc_addr = html.escape(addr_clean) if addr_clean else None
+    start_long = _rental_start_date_long(start_date)
+    esc_start = html.escape(start_long)
+    esc_fac = html.escape(PICKUP_FACILITY_ADDRESS)
+    esc_time = html.escape(PICKUP_STANDARD_TIME_LABEL)
+
+    plain_chunks: list[str] = []
+    html_chunks: list[str] = []
+
+    if delivery_requested:
+        loc = f" Address on file: {addr_clean}" if addr_clean else ""
+        plain_chunks.extend([
+            "DELIVERY",
+            f"We will deliver the equipment to your job site for the rental start ({start_long}).{loc}",
+            f"To coordinate timing or site access, email {RENTAL_COORDINATION_EMAIL} with your name, the equipment reserved, and your rental dates.",
+            "",
+        ])
+        html_chunks.append(
+            "<h2 style=\"margin:18px 0 8px;font-size:14px;font-weight:700;color:#1e4d3a;\">Delivery</h2>"
+            "<p style=\"margin:0 0 10px;\">We will <strong>deliver</strong> the equipment to your job site for the rental start "
+            f"(<strong>{esc_start}</strong>)."
+            + (f" Address on file: <strong>{esc_addr}</strong>." if esc_addr else "")
+            + "</p>"
+            f'<p style="margin:0 0 10px;">To coordinate timing or site access, email <a href="mailto:{esc_coord}">{esc_coord}</a> '
+            "with your name, the equipment reserved, and your rental dates.</p>"
+        )
+    else:
+        plain_chunks.extend([
+            "CUSTOMER PICKUP (FACILITY)",
+            f"Pickup location: {PICKUP_FACILITY_ADDRESS}",
+            "",
+            "Scheduled pickup",
+            f"Standard pickup is {PICKUP_STANDARD_TIME_LABEL} on {start_long} — the first day of your rental period. "
+            "Please arrive on time so we can complete your paperwork and equipment walk-through.",
+            "",
+            "Alternate pickup time",
+            f"If you need a different pickup time, email {RENTAL_COORDINATION_EMAIL} with your name, the equipment reserved, and your rental dates.",
+            "",
+        ])
+        html_chunks.append(
+            "<h2 style=\"margin:18px 0 8px;font-size:14px;font-weight:700;color:#1e4d3a;\">Customer pickup (facility)</h2>"
+            f"<p style=\"margin:0 0 6px;\"><strong>{esc_fac}</strong></p>"
+            "<h3 style=\"margin:14px 0 6px;font-size:13px;font-weight:600;color:#334155;\">Scheduled pickup</h3>"
+            f"<p style=\"margin:0 0 10px;\">Standard pickup is <strong>{esc_time}</strong> on <strong>{esc_start}</strong> — "
+            "the first day of your rental period. Please arrive on time so we can complete your paperwork and equipment walk-through.</p>"
+            "<h3 style=\"margin:14px 0 6px;font-size:13px;font-weight:600;color:#334155;\">Alternate pickup time</h3>"
+            f'<p style="margin:0 0 10px;">Email <a href="mailto:{esc_coord}">{esc_coord}</a> with your name, the equipment reserved, and your rental dates.</p>'
+        )
+
+    if pickup_from_site_requested:
+        loc = f" Address on file: {addr_clean}" if addr_clean else ""
+        plain_chunks.extend([
+            "END OF RENTAL — PICKUP FROM YOUR SITE",
+            "We will pick up the equipment from your job site after the rental period."
+            f"{loc} Please have the equipment accessible.",
+            f"Email {RENTAL_COORDINATION_EMAIL} to coordinate the pickup window.",
+            "",
+        ])
+        html_chunks.append(
+            "<h2 style=\"margin:18px 0 8px;font-size:14px;font-weight:700;color:#1e4d3a;\">End of rental — pickup from your site</h2>"
+            "<p style=\"margin:0 0 10px;\">We will <strong>pick up</strong> the equipment from your job site after the rental period."
+            + (f" Address on file: <strong>{esc_addr}</strong>." if esc_addr else "")
+            + " Please have the equipment accessible.</p>"
+            f'<p style="margin:0 0 10px;">Email <a href="mailto:{esc_coord}">{esc_coord}</a> to coordinate the pickup window.</p>'
+        )
+
+    return plain_chunks, "".join(html_chunks)
+
+
+def send_customer_booking_fully_complete_email(
     settings: Settings,
     *,
     to_addr: str,
     item_title: str,
-    next_status: str,
-    pdf_path: str | None,
+    start_date: str,
+    end_date: str,
+    rental_total_with_tax: Decimal | None,
+    deposit_amount: Decimal | None,
+    delivery_requested: bool = False,
+    pickup_from_site_requested: bool = False,
+    delivery_address: str | None = None,
+    greeting_name: str | None = None,
 ) -> bool:
+    """
+    One customer email after the rental agreement is signed and Stripe rental (and deposit, if any) are satisfied.
+    Confirms the booking is complete and includes delivery / pickup next steps.
+    """
     if not smtp_configured(settings):
-        log.info("SMTP not configured; skipping signature confirmation to %s", to_addr)
+        log.info("SMTP not configured; skipping booking-complete email to %s", to_addr)
         return False
-    subject = f"{LEGAL_BUSINESS_NAME} — agreement signed ({item_title})"
-    pdf_note = f"\nExecuted packet saved at: {pdf_path}\n" if pdf_path else ""
-    pay_plain = [
-        "",
-        "Payment links were included in your approval email (same thread). Complete any remaining steps there,",
-        "or open “My rentals” on our site after signing in if you use the same email address.",
-        "",
-    ]
-    pay_html = """\
-<p class="muted" style="font-size:0.95em">Use the <strong>Stripe links in your approval email</strong> for rental and deposit (if applicable), or visit <strong>My rentals</strong> while signed in.</p>"""
+    subject = f"{LEGAL_BUSINESS_NAME} — booking confirmed: your next steps"
+    base = html.escape((settings.frontend_public_url or "").strip().rstrip("/") or "")
+    my_rentals_line = ""
+    my_rentals_html = ""
+    if base:
+        mr = f"{base}/my-rentals"
+        my_rentals_line = f"\nBooking status: {mr}\n"
+        my_rentals_html = (
+            f'<p class="muted" style="font-size:0.95em">'
+            f'<a href="{html.escape(mr, quote=True)}"{NO_TRACK_A_ATTR}>My rentals</a>'
+            f" — sign in with the same email to view this booking.</p>"
+        )
+    safe_title = html.escape(item_title)
+    amt_lines: list[str] = []
+    amt_html: list[str] = []
+    if rental_total_with_tax is not None:
+        amt_lines.append(f"Rental total paid (with tax): {_money(rental_total_with_tax)}")
+        amt_html.append(f"<li>Rental total (with tax): {_money(rental_total_with_tax)}</li>")
+    dep_dec: Decimal | None = None
+    if deposit_amount is not None:
+        try:
+            dep_dec = Decimal(str(deposit_amount))
+        except Exception:
+            dep_dec = None
+    if dep_dec is not None and dep_dec > 0:
+        amt_lines.append(f"Security deposit (hold): {_money(dep_dec)}")
+        amt_html.append(f"<li>Security deposit (hold): {_money(dep_dec)}</li>")
+
+    greet = (greeting_name or "").strip()
+    salutation_plain = f"Dear {greet}," if greet else "Hello,"
+    salutation_html = html.escape(salutation_plain)
+
+    plain_fulfill, fulfill_html = _fulfillment_next_steps_plain_html(
+        start_date=start_date,
+        delivery_requested=delivery_requested,
+        pickup_from_site_requested=pickup_from_site_requested,
+        delivery_address=delivery_address,
+    )
 
     plain = "\n".join(
         [
-            "Your signed rental agreement has been recorded.",
+            salutation_plain,
+            "",
+            "Your booking is confirmed.",
+            "",
+            "All required steps are complete: your rental agreement is signed and your rental payment (and security deposit, if applicable) have been submitted successfully through Stripe.",
+            "You do not need to take further action for paperwork or payment.",
+            "",
             f"Item: {item_title}",
-            f"Booking status: {next_status}",
-            *pay_plain,
-            pdf_note,
+            f"Dates: {start_date} → {end_date}",
+            *amt_lines,
+            "",
+            "— NEXT STEPS —",
+            *plain_fulfill,
+            my_rentals_line.rstrip(),
             *_plain_signature_lines(),
         ]
     )
-    safe_title = html.escape(item_title)
     html_body = f"""\
-<html><body>
-<p><strong>Agreement signed</strong></p>
-<p>Your rental agreement for <strong>{safe_title}</strong> has been recorded.</p>
-<p>Status: {html.escape(next_status)}</p>
-{pay_html}
+<html><body style="font-family:Arial,sans-serif;color:#0f172a">
+<p><strong>Booking confirmed</strong></p>
+<p style="margin:0 0 8px;">{salutation_html}</p>
+<p style="margin:0 0 12px;">Your booking is <strong>confirmed</strong>.</p>
+<p style="margin:0 0 12px;">All required steps are complete: your <strong>rental agreement</strong> is signed and your <strong>rental payment</strong> (and <strong>security deposit</strong>, if applicable) have been submitted successfully through Stripe.</p>
+<p style="margin:0 0 18px;">You do not need to take further action for paperwork or payment.</p>
+<p><strong>{safe_title}</strong><br/>
+{html.escape(start_date)} → {html.escape(end_date)}</p>
+<ul style="margin:8px 0 16px;">
+{"".join(amt_html)}
+</ul>
+<p style="margin:16px 0 8px;font-weight:700;">Next steps</p>
+{fulfill_html}
+{my_rentals_html}
 {_email_signature_html()}
 </body></html>"""
     try:
         _send_message(settings, to_addr, subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send signature confirmation email: %s", e)
+        log.warning("Failed to send booking-complete email: %s", e)
         return False
 
 

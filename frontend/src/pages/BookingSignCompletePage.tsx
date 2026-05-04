@@ -10,12 +10,10 @@ export function BookingSignCompletePage() {
   const { token } = useParams<{ token: string }>()
   const [data, setData] = useState<BookingSignCompleteOut | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const tokenOk = Boolean(token?.trim())
 
   useEffect(() => {
-    if (!token) {
-      setError('Missing link.')
-      return
-    }
+    if (!tokenOk || !token) return
     let cancelled = false
     apiGetPublic<BookingSignCompleteOut>(
       `/booking-actions/${encodeURIComponent(token)}/complete`,
@@ -29,7 +27,7 @@ export function BookingSignCompletePage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, tokenOk])
 
   useEffect(() => {
     if (!token || !data?.booking_id) return
@@ -39,6 +37,16 @@ export function BookingSignCompletePage() {
       /* ignore quota / private mode */
     }
   }, [token, data?.booking_id])
+
+  if (!tokenOk) {
+    return (
+      <div className="container">
+        <h1>Next steps</h1>
+        <p className="error-msg">Missing link.</p>
+        <Link to="/catalog">Back to catalog</Link>
+      </div>
+    )
+  }
 
   if (error) {
     return (

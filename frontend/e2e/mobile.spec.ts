@@ -111,7 +111,7 @@ test.describe('Mobile viewports', () => {
   })
 
   test.describe('Mobile: Admin', () => {
-    test.beforeAll(({}, testInfo) => {
+    test.beforeAll((_worker, testInfo) => {
       testInfo.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and backend Auth0 + admin rules)')
     })
 

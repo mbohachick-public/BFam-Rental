@@ -89,6 +89,89 @@ def test_mine_returns_summaries(client, fake_settings, customer_token_ok, seed_i
     assert "drivers_license" not in row
 
 
+def test_mine_detail_404_wrong_sub(client, fake_settings, customer_token_ok, seed_item, db_store):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.id"
+    item = seed_item()
+    bid = str(uuid.uuid4())
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item["id"],
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-02",
+            "status": "requested",
+            "customer_email": "other@test.com",
+            "customer_phone": "5551234567",
+            "customer_first_name": "A",
+            "customer_last_name": "B",
+            "customer_address": "1 Main St",
+            "customer_auth0_sub": "auth0|someone-else",
+            "notes": None,
+            "base_amount": 100.0,
+            "discount_percent": 0.0,
+            "discounted_subtotal": 100.0,
+            "deposit_amount": 50.0,
+            "sales_tax_rate_percent": 4.225,
+            "sales_tax_amount": 4.23,
+            "rental_total_with_tax": 104.23,
+            "sales_tax_source": "fallback",
+            "drivers_license_path": None,
+            "license_plate_path": None,
+            "decline_reason": None,
+            "created_at": "2026-04-01T00:00:00",
+        }
+    )
+    res = client.get(f"/booking-requests/mine/{bid}", headers=AUTH)
+    assert res.status_code == 404
+
+
+def test_mine_detail_200(client, fake_settings, customer_token_ok, seed_item, db_store):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.id"
+    item = seed_item(title="Watercraft")
+    bid = str(uuid.uuid4())
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item["id"],
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-02",
+            "status": "confirmed",
+            "customer_email": "cust@test.com",
+            "customer_phone": "5551234567",
+            "customer_first_name": "A",
+            "customer_last_name": "B",
+            "customer_address": "1 Main St",
+            "customer_auth0_sub": SUB,
+            "notes": "Please call first",
+            "base_amount": 100.0,
+            "discount_percent": 0.0,
+            "discounted_subtotal": 100.0,
+            "deposit_amount": 50.0,
+            "sales_tax_rate_percent": 4.225,
+            "sales_tax_amount": 4.23,
+            "rental_total_with_tax": 104.23,
+            "sales_tax_source": "fallback",
+            "drivers_license_path": None,
+            "license_plate_path": None,
+            "decline_reason": None,
+            "delivery_requested": False,
+            "pickup_from_site_requested": False,
+            "delivery_address": None,
+            "created_at": "2026-04-01T00:00:00",
+        }
+    )
+    res = client.get(f"/booking-requests/mine/{bid}", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["id"] == bid
+    assert body["item_title"] == "Watercraft"
+    assert body["has_executed_contract"] is False
+    assert body["item_active"] is True
+    assert body["notes"] == "Please call first"
+
+
 def test_contact_404_when_no_bookings(client, fake_settings, customer_token_ok):
     fake_settings.auth0_domain = "tenant.auth0.com"
     fake_settings.auth0_audience = "https://api.id"

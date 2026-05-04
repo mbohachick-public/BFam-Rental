@@ -1,3 +1,5 @@
+/* Context modules pair Provider + hook; fast-refresh wants single export. */
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type ReactNode } from 'react'
 
 export type CustomerSession =

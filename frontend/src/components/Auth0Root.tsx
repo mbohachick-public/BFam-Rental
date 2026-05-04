@@ -15,9 +15,12 @@ function ClearCustomerTokenGetter() {
 function Auth0AccessTokenBridge() {
   const { getAccessTokenSilently } = useAuth0()
   const getTokenRef = useRef(getAccessTokenSilently)
-  getTokenRef.current = getAccessTokenSilently
 
-  /* Register once; use ref so we always call the latest getAccessTokenSilently. */
+  useLayoutEffect(() => {
+    getTokenRef.current = getAccessTokenSilently
+  }, [getAccessTokenSilently])
+
+  /* Register once; refresh when Auth0 replaces the token getter. */
   useLayoutEffect(() => {
     setCustomerAccessTokenGetter(async (opts?: CustomerTokenOptions) => {
       const audience = import.meta.env.VITE_AUTH0_AUDIENCE?.trim()
@@ -41,7 +44,7 @@ function Auth0AccessTokenBridge() {
       }
     })
     return () => setCustomerAccessTokenGetter(null)
-  }, [])
+  }, [getAccessTokenSilently])
   return null
 }
 
@@ -60,7 +63,7 @@ function E2EDevAuth0Shell({ children, accessToken }: { children: ReactNode; acce
   )
 
   useLayoutEffect(() => {
-    setCustomerAccessTokenGetter(async (_opts?: CustomerTokenOptions) => accessToken)
+    setCustomerAccessTokenGetter(async () => accessToken)
     return () => setCustomerAccessTokenGetter(null)
   }, [accessToken])
 

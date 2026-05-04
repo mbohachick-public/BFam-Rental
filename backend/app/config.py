@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     item_images_local_dir: str = "data/item-images"
     # Used in JSON links for local booking document routes (admin fetches with Bearer token).
     api_public_url: str = "http://127.0.0.1:8000"
-    # Optional SMTP — when set, quote and booking confirmation emails are sent to the customer.
+    # Optional SMTP — when set, pricing quote (on booking intake), continue-link, and other booking emails are sent to the customer.
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -108,11 +108,15 @@ class Settings(BaseSettings):
     payment_collection_url_template: str = ""
     # Customer signing links in emails: origin of the Vite app (no trailing slash).
     frontend_public_url: str = "http://localhost:5173"
+    #: Absolute URL for Step 2 "View rental terms" link. Empty = API omits link from completion-summary.
+    rental_terms_url: str = ""
     signing_token_ttl_days: int = 14
     # Executed agreement PDFs written by the API (relative to backend cwd or absolute).
     contract_packets_dir: str = "data/contract-packets"
     # Stripe Checkout (rental); webhook uses raw body + STRIPE_WEBHOOK_SECRET.
     stripe_secret_key: str = ""
+    #: Publishable key returned to the browser for Stripe.js (SetupIntent on Step 2).
+    stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
     # When true, Checkout adds a second line item for deposit_amount and webhook sets deposit_secured_at on success.
     stripe_checkout_include_deposit: bool = True
@@ -121,6 +125,8 @@ class Settings(BaseSettings):
     # Google Distance Matrix (server-side only) for delivery mileage when delivery is enabled.
     google_maps_api_key: str = ""
     google_maps_http_timeout_sec: float = 12.0
+    #: Optional add-on shown on Step 2 damage waiver (USD per rental day). Set to 0 to hide in UI.
+    damage_waiver_per_day_usd: str = "15.00"
 
     @field_validator("supabase_url")
     @classmethod

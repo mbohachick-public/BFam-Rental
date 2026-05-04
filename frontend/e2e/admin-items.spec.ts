@@ -1,7 +1,7 @@
 import { test, expect, loginAsAdmin, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 test.describe('Admin items list and CRUD', () => {
-  test.beforeAll(({}, testInfo) => {
+  test.beforeAll((_worker, testInfo) => {
     testInfo.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and backend Auth0 + admin rules)')
   })
 
@@ -93,7 +93,7 @@ test.describe('Admin items list and CRUD', () => {
   })
 
   test('items list has edit and calendar links', async ({ page, api }) => {
-    const item = await api.createItem({ title: 'Links E2E' })
+    await api.createItem({ title: 'Links E2E' })
     await page.goto('/admin/items')
 
     const row = page.locator('.admin-table-row', { hasText: 'Links E2E' })

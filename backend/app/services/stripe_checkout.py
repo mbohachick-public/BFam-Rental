@@ -82,6 +82,8 @@ def create_checkout_session_for_booking(
     delivery_fee = (
         Decimal(str(delivery_fee_raw)) if delivery_fee_raw is not None else Decimal("0")
     )
+    pickup_fee_raw = row.get("pickup_fee")
+    pickup_fee = Decimal(str(pickup_fee_raw)) if pickup_fee_raw is not None else Decimal("0")
     start = row.get("start_date")
     end = row.get("end_date")
     try:
@@ -101,8 +103,12 @@ def create_checkout_session_for_booking(
     customer_email = str(row.get("customer_email") or "").strip() or None
 
     line_name = f"{item_title} rental — {num_days} day{'s' if num_days != 1 else ''}"
-    if delivery_fee > 0:
+    if delivery_fee > 0 and pickup_fee > 0:
+        line_name = f"{line_name} (includes delivery & pickup from site)"
+    elif delivery_fee > 0:
         line_name = f"{line_name} (includes delivery)"
+    elif pickup_fee > 0:
+        line_name = f"{line_name} (includes pickup from site)"
     deposit_line_name = f"{item_title} — refundable security deposit"
 
     now = datetime.now(timezone.utc).isoformat()

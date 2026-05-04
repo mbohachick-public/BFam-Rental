@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 class DayStatus(str, Enum):
@@ -19,6 +19,8 @@ class BookingRequestStatus(str, Enum):
 
     pending = "pending"
     requested = "requested"
+    #: Customer finished Step 2 and is waiting for owner review.
+    pending_approval = "pending_approval"
     under_review = "under_review"
     approved_awaiting_signature = "approved_awaiting_signature"
     approved_pending_payment = "approved_pending_payment"
@@ -47,6 +49,13 @@ def payment_path_from_stored(value: object) -> PaymentPath:
     if not raw:
         raise ValueError("payment_path is empty")
     return PaymentPath.card
+
+
+class DepositAuthorizationStatus(str, Enum):
+    not_started = "not_started"
+    authorized = "authorized"
+    failed = "failed"
+    not_required = "not_required"
 
 
 class RentalPaymentStatus(str, Enum):
@@ -96,7 +105,9 @@ class BookingQuote(BaseModel):
     discounted_subtotal: Decimal
     deposit_amount: Decimal
     delivery_fee: Decimal = Decimal("0")
+    pickup_fee: Decimal = Decimal("0")
     delivery_distance_miles: Decimal | None = None
+    pickup_distance_miles: Decimal | None = None
     sales_tax_rate_percent: Decimal
     sales_tax_amount: Decimal
     rental_total_with_tax: Decimal
@@ -110,14 +121,23 @@ class BookingQuoteRequest(BaseModel):
     start_date: date
     end_date: date
     customer_email: EmailStr
+    customer_address: str = Field(..., min_length=1, max_length=500)
     tax_postal_code: str | None = Field(default=None, max_length=16)
     delivery_requested: bool = False
-    delivery_address: str | None = Field(default=None, max_length=500)
+    pickup_from_site_requested: bool = False
+    job_site_address: str | None = Field(
+        default=None,
+        max_length=500,
+        validation_alias=AliasChoices("job_site_address", "logistics_address", "delivery_address"),
+    )
 
     @model_validator(mode="after")
-    def _delivery_address_when_requested(self) -> Self:
-        if self.delivery_requested and not (self.delivery_address or "").strip():
-            raise ValueError("delivery_address is required when delivery_requested is true.")
+    def _job_site_when_needed_quote(self) -> Self:
+        needs = self.delivery_requested or self.pickup_from_site_requested
+        if needs and not (self.job_site_address or "").strip():
+            raise ValueError(
+                "job_site_address is required when delivery or pickup from site is selected.",
+            )
         return self
 
 
@@ -129,6 +149,105 @@ class BookingContactForm(BaseModel):
     customer_first_name: str = Field(..., min_length=1, max_length=100)
     customer_last_name: str = Field(..., min_length=1, max_length=100)
     customer_address: str = Field(..., min_length=1, max_length=500)
+
+
+class BookingIntakeCreate(BaseModel):
+    """POST /booking-requests/intake — create REQUESTED booking and redirect customer to completion."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    item_id: str
+    start_date: date
+    end_date: date
+    customer_email: EmailStr
+    customer_phone: str = Field(..., min_length=7, max_length=32)
+    customer_first_name: str = Field(..., min_length=1, max_length=100)
+    customer_last_name: str = Field(..., min_length=1, max_length=100)
+    customer_address: str = Field(..., min_length=1, max_length=500)
+    notes: str | None = Field(default=None, max_length=5000)
+    company_name: str | None = Field(default=None, max_length=200)
+    delivery_requested: bool = False
+    pickup_from_site_requested: bool = False
+    job_site_address: str | None = Field(
+        default=None,
+        max_length=500,
+        validation_alias=AliasChoices("job_site_address", "logistics_address", "delivery_address"),
+    )
+    #: Used for estimated tax until a full address is provided on Step 2.
+    tax_postal_code: str | None = Field(default=None, max_length=16)
+
+    @model_validator(mode="after")
+    def _job_site_when_needed_intake(self) -> Self:
+        needs = self.delivery_requested or self.pickup_from_site_requested
+        if needs and not (self.job_site_address or "").strip():
+            raise ValueError(
+                "job_site_address is required when delivery or pickup from site is selected.",
+            )
+        return self
+
+
+class BookingIntakeOut(BaseModel):
+    booking_id: str
+    complete_path: str
+    status: BookingRequestStatus
+
+
+class BookingVerificationSubmit(BaseModel):
+    """POST /booking-requests/{id}/verification — finalize docs + readiness for owner review."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    drivers_license_path: str = Field(..., min_length=8, max_length=500)
+    insurance_card_path: str | None = Field(default=None, max_length=500)
+    customer_address: str = Field(..., min_length=4, max_length=500)
+    job_site_address: str | None = Field(
+        default=None,
+        max_length=500,
+        validation_alias=AliasChoices("job_site_address", "logistics_address"),
+    )
+    vehicle_tow_capable_ack: bool = False
+    request_approval_acknowledged: bool = False
+    agreement_sign_intent_acknowledged: bool = False
+    damage_waiver_selected: bool = False
+    stripe_payment_method_id: str | None = Field(default=None, max_length=120)
+
+    @field_validator("request_approval_acknowledged")
+    @classmethod
+    def _must_ack_approval(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError(
+                "You must confirm that this request is subject to approval and is not yet confirmed."
+            )
+        return v
+
+
+class BookingStripeSetupIntentOut(BaseModel):
+    client_secret: str
+    publishable_key: str
+
+
+class BookingCompletionSummaryOut(BaseModel):
+    booking_id: str
+    status: BookingRequestStatus
+    item_title: str
+    start_date: date
+    end_date: date
+    num_days: int
+    towable: bool
+    delivery_requested: bool
+    pickup_from_site_requested: bool = False
+    discounted_subtotal: Decimal
+    deposit_amount: Decimal
+    rental_total_with_tax: Decimal
+    delivery_fee: Decimal = Decimal("0")
+    pickup_fee: Decimal = Decimal("0")
+    damage_waiver_daily_amount: Decimal = Decimal("0")
+    stripe_payment_collection_enabled: bool
+    rental_terms_url: str | None = None
+    logistics_address: str | None = None
+    delivery_address: str | None = None
+    job_site_address: str | None = None
+    customer_address: str | None = None
 
 
 class BookingRequestCreate(BookingContactForm):
@@ -144,6 +263,19 @@ class BookingUploadSlot(BaseModel):
     path: str
     signed_url: str
     token: str
+
+
+class BookingCompletionPresignBody(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    drivers_license_content_type: str = Field(..., min_length=3, max_length=80)
+    insurance_card_content_type: str | None = Field(default=None, max_length=80)
+
+
+class BookingCompletionPresignOut(BaseModel):
+    drivers_license: BookingUploadSlot
+    insurance_card: BookingUploadSlot | None = None
+    expires_in: int
 
 
 class BookingPresignRequest(BookingContactForm):
@@ -167,7 +299,12 @@ class BookingPresignRequest(BookingContactForm):
     has_brake_controller: bool | None = None
     request_not_confirmed_ack: bool = False
     delivery_requested: bool = False
-    delivery_address: str | None = Field(default=None, max_length=500)
+    pickup_from_site_requested: bool = False
+    job_site_address: str | None = Field(
+        default=None,
+        max_length=500,
+        validation_alias=AliasChoices("job_site_address", "logistics_address", "delivery_address"),
+    )
 
     @field_validator("request_not_confirmed_ack")
     @classmethod
@@ -177,9 +314,12 @@ class BookingPresignRequest(BookingContactForm):
         return v
 
     @model_validator(mode="after")
-    def _delivery_address_when_requested_presign(self) -> Self:
-        if self.delivery_requested and not (self.delivery_address or "").strip():
-            raise ValueError("delivery_address is required when delivery_requested is true.")
+    def _job_site_when_needed_presign(self) -> Self:
+        needs = self.delivery_requested or self.pickup_from_site_requested
+        if needs and not (self.job_site_address or "").strip():
+            raise ValueError(
+                "job_site_address is required when delivery or pickup from site is selected.",
+            )
         return self
 
 
@@ -266,8 +406,11 @@ class BookingRequestOut(BaseModel):
     company_name: str | None = None
     delivery_address: str | None = None
     delivery_requested: bool | None = None
+    pickup_from_site_requested: bool | None = None
     delivery_fee: Decimal | None = None
+    pickup_fee: Decimal | None = None
     delivery_distance_miles: Decimal | None = None
+    pickup_distance_miles: Decimal | None = None
     payment_method_preference: str | None = None
     is_repeat_contractor: bool | None = None
     tow_vehicle_year: int | None = None
@@ -295,8 +438,27 @@ class BookingRequestOut(BaseModel):
     stripe_deposit_checkout_url: str | None = None
     stripe_deposit_checkout_created_at: str | None = None
     stripe_deposit_payment_intent_id: str | None = None
+    agreement_terms_acknowledged: bool | None = None
+    request_approval_acknowledged: bool | None = None
+    agreement_sign_intent_acknowledged: bool | None = None
+    vehicle_tow_capable_ack: bool | None = None
+    damage_waiver_selected: bool | None = None
+    damage_waiver_daily_amount: Decimal | None = None
+    damage_waiver_line_total: Decimal | None = None
+    rental_subtotal_snapshot: Decimal | None = None
+    stripe_saved_payment_method_id: str | None = None
+    deposit_authorization_status: DepositAuthorizationStatus | str | None = None
+    verification_submitted_at: str | None = None
     # Populated only on admin approve/resend for copy to customer (not stored on row).
     signing_url: str | None = None
+
+
+class CustomerBookingDetailOut(BookingRequestOut):
+    """Signed-in customer: full request + item title; document URLs use /mine/… paths or Supabase signed URLs."""
+
+    item_title: str
+    has_executed_contract: bool = False
+    item_active: bool = True
 
 
 class StripeCheckoutSessionOut(BaseModel):

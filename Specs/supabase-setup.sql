@@ -54,6 +54,7 @@ create type public.booking_request_status as enum (
   'accepted',
   'rejected',
   'requested',
+  'pending_approval',
   'under_review',
   'approved_awaiting_signature',
   'approved_pending_payment',
@@ -179,15 +180,34 @@ create table public.booking_requests (
   deposit_refunded_at timestamptz,
   stripe_deposit_refund_id text,
   delivery_requested boolean not null default false,
+  pickup_from_site_requested boolean not null default false,
   delivery_fee numeric not null default 0,
+  pickup_fee numeric not null default 0,
   delivery_distance_miles numeric,
+  pickup_distance_miles numeric,
+  agreement_terms_acknowledged boolean not null default false,
+  request_approval_acknowledged boolean not null default false,
+  agreement_sign_intent_acknowledged boolean not null default false,
+  vehicle_tow_capable_ack boolean not null default false,
+  damage_waiver_selected boolean not null default false,
+  damage_waiver_daily_amount numeric not null default 0,
+  damage_waiver_line_total numeric not null default 0,
+  rental_subtotal_snapshot numeric,
+  stripe_saved_payment_method_id text,
+  deposit_authorization_status text,
+  verification_submitted_at timestamptz,
   check (end_date >= start_date),
   constraint booking_requests_payment_method_preference_check
     check (payment_method_preference is null or payment_method_preference in ('card', 'ach')),
   constraint booking_requests_payment_path_check
     check (payment_path is null or payment_path in ('card', 'ach', 'business_check')),
   constraint booking_requests_rental_payment_status_check
-    check (rental_payment_status in ('unpaid', 'paid', 'failed', 'refunded'))
+    check (rental_payment_status in ('unpaid', 'paid', 'failed', 'refunded')),
+  constraint booking_requests_deposit_authorization_status_check
+    check (
+      deposit_authorization_status is null
+      or deposit_authorization_status in ('not_started', 'authorized', 'failed', 'not_required')
+    )
 );
 
 create index booking_requests_item_id_idx on public.booking_requests (item_id);
@@ -229,11 +249,35 @@ comment on column public.booking_requests.deposit_refunded_at is
 comment on column public.booking_requests.stripe_deposit_refund_id is
   'Stripe Refund id (re_...) for the deposit partial refund.';
 comment on column public.booking_requests.delivery_requested is
-  'Customer requested delivery to delivery_address.';
+  'Customer requested delivery of the trailer to the job site (delivery_address).';
+comment on column public.booking_requests.pickup_from_site_requested is
+  'Customer requested pickup of the trailer from the job site after rental.';
 comment on column public.booking_requests.delivery_fee is
-  'Computed delivery charge (taxed with rental subtotal).';
+  'Estimated delivery leg charge (taxed with rental subtotal).';
+comment on column public.booking_requests.pickup_fee is
+  'Estimated pickup-from-site leg charge (taxed with rental subtotal).';
 comment on column public.booking_requests.delivery_distance_miles is
-  'Road distance origin→delivery from routing API.';
+  'Road distance depot→job site for delivery routing.';
+comment on column public.booking_requests.pickup_distance_miles is
+  'Road distance for pickup leg (same route miles as delivery when both apply).';
+comment on column public.booking_requests.agreement_terms_acknowledged is
+  'Reserved for downstream use; formal contract acceptance is agreement_signed_at. Step 2 uses request_approval_acknowledged.';
+comment on column public.booking_requests.request_approval_acknowledged is
+  'Customer confirmed on Step 2 that the booking is subject to approval and not yet confirmed.';
+comment on column public.booking_requests.agreement_sign_intent_acknowledged is
+  'Customer indicated intent to review and sign the rental agreement if approved (optional checkbox).';
+comment on column public.booking_requests.vehicle_tow_capable_ack is
+  'Customer confirmed tow vehicle suitability (towables).';
+comment on column public.booking_requests.damage_waiver_line_total is
+  'Estimated damage waiver dollar amount applied to taxed subtotal when selected.';
+comment on column public.booking_requests.rental_subtotal_snapshot is
+  'Rental subtotal before waiver at intake; waiver is added on verification.';
+comment on column public.booking_requests.stripe_saved_payment_method_id is
+  'Stripe PaymentMethod id collected before approval (saved card, no rental charge yet).';
+comment on column public.booking_requests.verification_submitted_at is
+  'When Step 2 was submitted for owner review.';
+comment on column public.booking_requests.deposit_authorization_status is
+  'Deposit readiness: not_started / authorized / failed / not_required.';
 
 create table public.booking_events (
   id uuid primary key default gen_random_uuid(),

@@ -1,24 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import {
-  apiDelete,
-  apiGet,
-  apiPost,
-  apiPostFormData,
-  uploadBookingFileToSignedUrl,
-} from '../api/client'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { apiGet, apiPost } from '../api/client'
 import { useCustomerSession } from '../context/CustomerSessionContext'
 import { MonthCalendar } from '../components/MonthCalendar'
 import { StatusLegend } from '../components/StatusLegend'
 import { firstOfMonth, lastOfMonth } from '../lib/calendar'
-import type {
-  BookingPresignResponse,
-  BookingQuote,
-  BookingRequestOut,
-  CustomerContactProfile,
-  DayAvailability,
-  ItemDetail,
-} from '../types'
+import type { BookingIntakeOut, BookingQuote, CustomerContactProfile, DayAvailability, ItemDetail } from '../types'
 
 function money(s: string) {
   const n = Number(s)
@@ -27,9 +14,66 @@ function money(s: string) {
     : s
 }
 
+/** Short, user-friendly copy for quote/intake failures tied to job site / routing. */
+function prettifyLogisticsErrorMessage(raw: string): string {
+  const d = raw.trim()
+  if (!d) {
+    return 'We couldn’t estimate logistics for this address. Try a fuller street address, city, state, and ZIP, or contact us.'
+  }
+  const lower = d.toLowerCase()
+
+  if (
+    lower.includes('outside the maximum service distance') ||
+    lower.includes('outside our delivery zone') ||
+    lower.includes('maximum service distance')
+  ) {
+    const m = d.match(/(\d+(?:\.\d+)?)\s*mi/i) ?? d.match(/\((\d+(?:\.\d+)?)\s*mile/i)
+    const cap = m ? m[1] : null
+    return cap
+      ? `That location looks beyond our service area (${cap}-mile limit). Try a different address or contact us.`
+      : 'That location looks beyond our service area. Try a different address or contact us.'
+  }
+
+  if (lower.includes('delivery is not enabled')) {
+    return 'Delivery routing isn’t available right now. Contact the rental office or choose “I will pick up and return the trailer.”'
+  }
+
+  if (lower.includes('google maps api key')) {
+    return 'Distance routing isn’t set up on our end yet. Contact us and we’ll help with your estimate.'
+  }
+
+  if (lower.includes('delivery origin is not configured') || lower.includes('admin → delivery')) {
+    return 'Our depot address isn’t configured for routing yet. Contact us for a delivery estimate.'
+  }
+
+  if (
+    lower.includes('route not found') ||
+    lower.includes('address is required when') ||
+    lower.includes('job site address is required')
+  ) {
+    return 'Enter a complete job site address (street, city, state, ZIP) so we can estimate delivery and pickup.'
+  }
+
+  if (lower.includes('this item does not offer delivery') || lower.includes('does not offer delivery or pickup')) {
+    return 'This equipment isn’t offered with delivery or site pickup. Choose customer pickup instead.'
+  }
+
+  if (lower.includes('distance matrix')) {
+    return 'We couldn’t look up driving distance for that address. Check spelling and include city and state.'
+  }
+
+  // Avoid dumping multi-line dev messages; use the first clear sentence
+  const oneLine = d.replace(/\s+/g, ' ')
+  const dot = oneLine.search(/\.(\s|$)/)
+  const firstBit = dot > 0 ? oneLine.slice(0, dot + 1).trim() : oneLine
+  return firstBit.length > 220 ? `${firstBit.slice(0, 217)}…` : firstBit
+}
+
 export function ItemDetailPage() {
+  const navigate = useNavigate()
   const customer = useCustomerSession()
   const customerSignedIn = customer.mode === 'auth0' && customer.isAuthenticated
+  const authBlocksSubmit = customer.mode === 'auth0' && !customer.isLoading && !customer.isAuthenticated
   const { id } = useParams<{ id: string }>()
   const [item, setItem] = useState<ItemDetail | null>(null)
   const [days, setDays] = useState<DayAvailability[]>([])
@@ -46,21 +90,19 @@ export function ItemDetailPage() {
   const [phone, setPhone] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [address, setAddress] = useState('')
-  const [taxZip, setTaxZip] = useState('')
   const [notes, setNotes] = useState('')
   const [companyName, setCompanyName] = useState('')
-  const [requestAck, setRequestAck] = useState(false)
-  const [deliveryRequested, setDeliveryRequested] = useState(false)
-  const [deliveryAddress, setDeliveryAddress] = useState('')
+  const [customerAddress, setCustomerAddress] = useState('')
+  const [deliverToSite, setDeliverToSite] = useState(false)
+  const [pickupFromSite, setPickupFromSite] = useState(false)
+  const [logisticsAddress, setLogisticsAddress] = useState('')
   const [quote, setQuote] = useState<BookingQuote | null>(null)
   const [quoteError, setQuoteError] = useState<string | null>(null)
+  const [logisticsAddressError, setLogisticsAddressError] = useState<string | null>(null)
   const [quoting, setQuoting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [submitOk, setSubmitOk] = useState<string | null>(null)
-  const [driversLicenseFile, setDriversLicenseFile] = useState<File | null>(null)
-  const [licensePlateFile, setLicensePlateFile] = useState<File | null>(null)
-  const [insuranceCardFile, setInsuranceCardFile] = useState<File | null>(null)
+  type IntakeSubmitPhase = 'idle' | 'saving' | 'email' | 'redirect'
+  const [submitPhase, setSubmitPhase] = useState<IntakeSubmitPhase>('idle')
   const [activeImageIdx, setActiveImageIdx] = useState(0)
 
   const sortedImages = useMemo(
@@ -69,18 +111,15 @@ export function ItemDetailPage() {
   )
 
   useEffect(() => {
-    setDriversLicenseFile(null)
-    setLicensePlateFile(null)
-    setInsuranceCardFile(null)
-    setFirstName('')
-    setLastName('')
-    setAddress('')
-    setTaxZip('')
     setActiveImageIdx(0)
     setCompanyName('')
-    setRequestAck(false)
-    setDeliveryRequested(false)
-    setDeliveryAddress('')
+    setDeliverToSite(false)
+    setPickupFromSite(false)
+    setLogisticsAddress('')
+    setFirstName('')
+    setLastName('')
+    setCustomerAddress('')
+    setLogisticsAddressError(null)
   }, [id])
 
   useEffect(() => {
@@ -135,7 +174,7 @@ export function ItemDetailPage() {
         setPhone((prev) => (prev.trim() ? prev : p.customer_phone))
         setFirstName((prev) => (prev.trim() ? prev : p.customer_first_name))
         setLastName((prev) => (prev.trim() ? prev : p.customer_last_name))
-        setAddress((prev) => (prev.trim() ? prev : p.customer_address))
+        setCustomerAddress((prev) => (prev.trim() ? prev : p.customer_address))
       })
       .catch(() => {
         /* 404 = no prior bookings */
@@ -147,11 +186,93 @@ export function ItemDetailPage() {
 
   useEffect(() => {
     if (item && item.delivery_available === false) {
-      setDeliveryRequested(false)
-      setDeliveryAddress('')
+      setDeliverToSite(false)
+      setPickupFromSite(false)
+      setLogisticsAddress('')
       setQuote(null)
+      setLogisticsAddressError(null)
     }
   }, [item])
+
+  useEffect(() => {
+    if (!id || !item || authBlocksSubmit) return
+
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        if (!startDate || !endDate) {
+          setQuote(null)
+          setLogisticsAddressError(null)
+          return
+        }
+        const em = email.trim()
+        if (!em) {
+          setQuote(null)
+          setLogisticsAddressError(null)
+          return
+        }
+        const custAddr = customerAddress.trim()
+        if (!custAddr) {
+          setQuote(null)
+          setLogisticsAddressError(null)
+          return
+        }
+        if (item.delivery_available && (deliverToSite || pickupFromSite) && !logisticsAddress.trim()) {
+          setQuote(null)
+          setLogisticsAddressError(null)
+          return
+        }
+        setQuoteError(null)
+        setLogisticsAddressError(null)
+        setQuoting(true)
+        try {
+          const q = await apiPost<BookingQuote>('/booking-requests/quote', {
+            item_id: id,
+            start_date: startDate,
+            end_date: endDate,
+            customer_email: em,
+            customer_address: custAddr,
+            ...(!item.delivery_available
+              ? { delivery_requested: false, pickup_from_site_requested: false }
+              : {
+                  delivery_requested: deliverToSite,
+                  pickup_from_site_requested: pickupFromSite,
+                  ...((deliverToSite || pickupFromSite)
+                    ? { job_site_address: logisticsAddress.trim() }
+                    : {}),
+                }),
+          })
+          setQuote(q)
+        } catch (e) {
+          setQuote(null)
+          const msg = e instanceof Error ? e.message : 'Quote failed'
+          const logisticsContext =
+            item.delivery_available && (deliverToSite || pickupFromSite) && logisticsAddress.trim().length > 0
+          if (logisticsContext) {
+            setLogisticsAddressError(prettifyLogisticsErrorMessage(msg))
+            setQuoteError(null)
+          } else {
+            setQuoteError(msg)
+            setLogisticsAddressError(null)
+          }
+        } finally {
+          setQuoting(false)
+        }
+      })()
+    }, 450)
+
+    return () => window.clearTimeout(handle)
+  }, [
+    id,
+    item,
+    authBlocksSubmit,
+    startDate,
+    endDate,
+    email,
+    deliverToSite,
+    pickupFromSite,
+    logisticsAddress,
+    customerAddress,
+  ])
 
   function shiftMonth(delta: number) {
     const d = new Date(calYear, calMonth - 1 + delta, 1)
@@ -159,111 +280,53 @@ export function ItemDetailPage() {
     setCalMonth(d.getMonth() + 1)
   }
 
-  async function getQuote() {
-    if (!id || !startDate || !endDate) {
-      setQuoteError('Choose a start and end date.')
-      return
-    }
-    const em = email.trim()
-    if (!em) {
-      setQuoteError('Email is required — we will send your quote there.')
-      return
-    }
-    if (item?.delivery_available && deliveryRequested && !deliveryAddress.trim()) {
-      setQuoteError('Enter a delivery address to include delivery on the quote.')
-      return
-    }
-    setQuoteError(null)
-    setQuote(null)
-    setQuoting(true)
-    try {
-      const zip = taxZip.trim()
-      const q = await apiPost<BookingQuote>('/booking-requests/quote', {
-        item_id: id,
-        start_date: startDate,
-        end_date: endDate,
-        customer_email: em,
-        ...(zip ? { tax_postal_code: zip } : {}),
-        ...(item?.delivery_available && deliveryRequested
-          ? { delivery_requested: true, delivery_address: deliveryAddress.trim() }
-          : { delivery_requested: false }),
-      })
-      setQuote(q)
-    } catch (e) {
-      setQuoteError(e instanceof Error ? e.message : 'Quote failed')
-    } finally {
-      setQuoting(false)
-    }
-  }
-
   async function submitRequest() {
     if (!id || !startDate || !endDate || !item) return
-    if (!driversLicenseFile) {
-      setQuoteError('Please upload a photo of your driver’s license.')
-      return
-    }
-    if (item.towable && !licensePlateFile) {
-      setQuoteError('This item is towable — please upload a photo of your vehicle’s license plate.')
+    if (!quote) {
+      setQuoteError('Please wait for your estimate to finish updating.')
+      setLogisticsAddressError(null)
       return
     }
     const em = email.trim()
     const ph = phone.trim()
     const fn = firstName.trim()
     const ln = lastName.trim()
-    const addr = address.trim()
     if (!em) {
       setQuoteError('Email is required.')
+      setLogisticsAddressError(null)
       return
     }
     if (ph.length < 7) {
       setQuoteError('Please enter a valid phone number (at least 7 digits).')
+      setLogisticsAddressError(null)
       return
     }
-    if (!fn || !ln || !addr) {
-      setQuoteError('First name, last name, and address are required (correct auto-fill if needed).')
+    if (!fn || !ln) {
+      setQuoteError('First and last name are required.')
+      setLogisticsAddressError(null)
       return
     }
-    if (!requestAck) {
-      setQuoteError('Please confirm that this is a booking request, not a guaranteed reservation.')
+    const custAddr = customerAddress.trim()
+    if (!custAddr) {
+      setQuoteError('Customer address is required.')
+      setLogisticsAddressError(null)
       return
     }
-    if (item.delivery_available && deliveryRequested && !deliveryAddress.trim()) {
-      setQuoteError('Delivery address is required when delivery is requested.')
+    if (item.delivery_available && (deliverToSite || pickupFromSite) && !logisticsAddress.trim()) {
+      setLogisticsAddressError('Enter a complete job site address (street, city, state, ZIP).')
+      setQuoteError(null)
       return
     }
     setSubmitting(true)
-    setSubmitOk(null)
+    setSubmitPhase('saving')
     setQuoteError(null)
-    const submitMultipart = async () => {
-      const fd = new FormData()
-      fd.append('item_id', id)
-      fd.append('start_date', startDate)
-      fd.append('end_date', endDate)
-      fd.append('customer_email', em)
-      fd.append('customer_phone', ph)
-      fd.append('customer_first_name', fn)
-      fd.append('customer_last_name', ln)
-      fd.append('customer_address', addr)
-      if (notes.trim()) fd.append('notes', notes.trim())
-      fd.append('drivers_license', driversLicenseFile)
-      if (item.towable && licensePlateFile) {
-        fd.append('license_plate', licensePlateFile)
-      }
-      if (insuranceCardFile) {
-        fd.append('insurance_card', insuranceCardFile)
-      }
-      if (item.delivery_available && deliveryRequested) {
-        fd.append('delivery_requested', 'true')
-        fd.append('delivery_address', deliveryAddress.trim())
-      }
-      await apiPostFormData('/booking-requests', fd)
-    }
+    setLogisticsAddressError(null)
+    const phaseTimer = window.setTimeout(() => {
+      setSubmitPhase((p) => (p === 'saving' ? 'email' : p))
+    }, 500)
+    let ok = false
     try {
-      const dlType = driversLicenseFile.type || 'image/jpeg'
-      const lpType =
-        item.towable && licensePlateFile ? licensePlateFile.type || 'image/jpeg' : undefined
-      const insType = insuranceCardFile ? insuranceCardFile.type || 'image/jpeg' : undefined
-      const presignBody: Record<string, unknown> = {
+      const out = await apiPost<BookingIntakeOut>('/booking-requests/intake', {
         item_id: id,
         start_date: startDate,
         end_date: endDate,
@@ -271,68 +334,39 @@ export function ItemDetailPage() {
         customer_phone: ph,
         customer_first_name: fn,
         customer_last_name: ln,
-        customer_address: addr,
+        customer_address: custAddr,
         notes: notes.trim() || undefined,
-        drivers_license_content_type: dlType,
-        license_plate_content_type: lpType,
-        insurance_card_content_type: insType,
-        request_not_confirmed_ack: true,
         company_name: companyName.trim() || undefined,
-      }
-      if (item.delivery_available) {
-        presignBody.delivery_requested = deliveryRequested
-        presignBody.delivery_address = deliveryRequested ? deliveryAddress.trim() : undefined
-      }
-      try {
-        const pre = await apiPost<BookingPresignResponse>('/booking-requests/presign', presignBody)
-        try {
-          await uploadBookingFileToSignedUrl(pre.drivers_license.signed_url, driversLicenseFile, dlType)
-          if (pre.license_plate && licensePlateFile) {
-            await uploadBookingFileToSignedUrl(
-              pre.license_plate.signed_url,
-              licensePlateFile,
-              lpType || 'image/jpeg',
-            )
-          }
-          if (pre.insurance_card && insuranceCardFile) {
-            await uploadBookingFileToSignedUrl(
-              pre.insurance_card.signed_url,
-              insuranceCardFile,
-              insType || 'image/jpeg',
-            )
-          }
-          await apiPost<BookingRequestOut>(`/booking-requests/${pre.booking_id}/complete`, {
-            drivers_license_path: pre.drivers_license.path,
-            license_plate_path: pre.license_plate?.path ?? null,
-            insurance_card_path: pre.insurance_card?.path ?? null,
-          })
-        } catch (stepErr) {
-          try {
-            await apiDelete(`/booking-requests/${pre.booking_id}/abandon`)
-          } catch {
-            /* best-effort cleanup */
-          }
-          throw stepErr
-        }
-      } catch (inner) {
-        const m = inner instanceof Error ? inner.message : String(inner)
-        if (
-          /BOOKING_DOCUMENTS_STORAGE=local|multipart form data|Presigned uploads require/i.test(m)
-        ) {
-          await submitMultipart()
-        } else {
-          throw inner
-        }
-      }
-      setSubmitOk('Request submitted. We will follow up when it is reviewed.')
-      setQuote(null)
-      setDriversLicenseFile(null)
-      setLicensePlateFile(null)
-      setInsuranceCardFile(null)
+        delivery_requested: Boolean(item.delivery_available && deliverToSite),
+        pickup_from_site_requested: Boolean(item.delivery_available && pickupFromSite),
+        ...(item.delivery_available && (deliverToSite || pickupFromSite)
+          ? { job_site_address: logisticsAddress.trim() }
+          : {}),
+      })
+      ok = true
+      window.clearTimeout(phaseTimer)
+      setSubmitPhase('redirect')
+      navigate(out.complete_path)
     } catch (e) {
-      setQuoteError(e instanceof Error ? e.message : 'Submit failed')
+      const msg = e instanceof Error ? e.message : 'Submit failed'
+      const logisticsContext =
+        item.delivery_available && (deliverToSite || pickupFromSite) && logisticsAddress.trim().length > 0
+      if (
+        logisticsContext &&
+        /address|delivery|pickup|mile|route|logistics|job site|outside|maps|distance/i.test(msg)
+      ) {
+        setLogisticsAddressError(prettifyLogisticsErrorMessage(msg))
+        setQuoteError(null)
+      } else {
+        setQuoteError(msg)
+        setLogisticsAddressError(null)
+      }
     } finally {
-      setSubmitting(false)
+      window.clearTimeout(phaseTimer)
+      if (!ok) {
+        setSubmitting(false)
+        setSubmitPhase('idle')
+      }
     }
   }
 
@@ -412,14 +446,14 @@ export function ItemDetailPage() {
             </div>
             <div>
               <dt>Towable</dt>
-              <dd>{item.towable ? 'Yes — license plate photo required to book' : 'No'}</dd>
+              <dd>{item.towable ? 'Yes — you will confirm towing on step 2' : 'No'}</dd>
             </div>
             <div>
               <dt>Delivery</dt>
               <dd>
                 {item.delivery_available === false
                   ? 'Pickup only at our location'
-                  : 'Pickup or delivery may be available — note your preference below'}
+                  : 'Pickup or delivery to your site — choose transport options when requesting'}
               </dd>
             </div>
           </dl>
@@ -449,10 +483,11 @@ export function ItemDetailPage() {
       </section>
 
       <section className="card card-pad section-block booking-block">
-        <h2>Request a booking</h2>
+        <h2>Step 1 of 2 — Request booking</h2>
+        <p className="muted">Reserve your trailer in under 60 seconds. No payment required yet.</p>
         {customer.mode === 'auth0' && !customer.isLoading && !customer.isAuthenticated && (
           <p className="booking-auth-hint">
-            <span className="muted">Sign in to get a quote and submit a booking request.</span>{' '}
+            <span className="muted">Sign in to see pricing and submit a booking request.</span>{' '}
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => customer.login()}>
               Sign in
             </button>
@@ -465,309 +500,342 @@ export function ItemDetailPage() {
             e.preventDefault()
           }}
         >
-        <div className="booking-grid">
-          <label className="field">
-            <span className="field-label">Start date</span>
-            <input
-              type="date"
-              name="booking_start_date"
-              value={startDate}
-              onChange={(e) => {
-                setStartDate(e.target.value)
-                setQuote(null)
-              }}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">End date</span>
-            <input
-              type="date"
-              name="booking_end_date"
-              value={endDate}
-              onChange={(e) => {
-                setEndDate(e.target.value)
-                setQuote(null)
-              }}
-            />
-          </label>
-          <label className="field field-span">
-            <span className="field-label">Driver’s license photo (required)</span>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={(e) => setDriversLicenseFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          <label className="field field-span">
-            <span className="field-label">Insurance card photo (optional)</span>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={(e) => setInsuranceCardFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          {item.towable && (
-            <label className="field field-span">
-              <span className="field-label">License plate photo (required for towable)</span>
+          <div className="booking-grid">
+            <label className="field">
+              <span className="field-label">Start date</span>
               <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={(e) => setLicensePlateFile(e.target.files?.[0] ?? null)}
+                type="date"
+                name="booking_start_date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value)
+                  setQuote(null)
+                }}
               />
             </label>
-          )}
-          <label className="field field-span">
-            <span className="field-label">Email (required)</span>
-            <input
-              type="email"
-              name="customer_email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="section-booking email"
-              required
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">ZIP for sales tax (optional)</span>
-            <input
-              type="text"
-              name="tax_postal_code"
-              inputMode="numeric"
-              autoComplete="section-booking postal-code"
-              maxLength={10}
-              placeholder="e.g. 64089"
-              value={taxZip}
-              onChange={(e) => {
-                setTaxZip(e.target.value)
-                setQuote(null)
-              }}
-            />
-          </label>
-          <label className="field field-span">
-            <span className="field-label">Phone (required)</span>
-            <input
-              type="tel"
-              name="customer_phone"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              autoComplete="section-booking tel"
-              inputMode="tel"
-              required
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">First name (required)</span>
-            <input
-              type="text"
-              name="customer_first_name"
-              id="booking-given-name"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              autoComplete="section-booking given-name"
-              required
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Last name (required)</span>
-            <input
-              type="text"
-              name="customer_last_name"
-              id="booking-family-name"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              autoComplete="section-booking family-name"
-              required
-            />
-          </label>
-          <label className="field field-span">
-            <span className="field-label">Address (required)</span>
-            <input
-              type="text"
-              name="customer_address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              autoComplete="section-booking street-address"
-              required
-            />
-          </label>
-          {item.delivery_available ? (
-            <>
-              <label className="field field-checkbox field-span">
-                <input
-                  type="checkbox"
-                  checked={deliveryRequested}
-                  onChange={(e) => {
-                    setDeliveryRequested(e.target.checked)
-                    setQuote(null)
-                  }}
-                />
-                <span>Request delivery to this address (fee by road miles; shown in quote)</span>
-              </label>
-              {deliveryRequested ? (
-                <label className="field field-span">
-                  <span className="field-label">Delivery address</span>
+            <label className="field">
+              <span className="field-label">End date</span>
+              <input
+                type="date"
+                name="booking_end_date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value)
+                  setQuote(null)
+                }}
+              />
+            </label>
+            <label className="field field-span">
+              <span className="field-label">Email (required)</span>
+              <input
+                type="email"
+                name="customer_email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="section-booking email"
+                required
+              />
+            </label>
+            <label className="field field-span">
+              <span className="field-label">Phone (required)</span>
+              <input
+                type="tel"
+                name="customer_phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                autoComplete="section-booking tel"
+                inputMode="tel"
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">First name (required)</span>
+              <input
+                type="text"
+                name="customer_first_name"
+                id="booking-given-name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                autoComplete="section-booking given-name"
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Last name (required)</span>
+              <input
+                type="text"
+                name="customer_last_name"
+                id="booking-family-name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                autoComplete="section-booking family-name"
+                required
+              />
+            </label>
+            <label className="field field-span">
+              <span className="field-label">Customer address (required)</span>
+              <textarea
+                value={customerAddress}
+                onChange={(e) => {
+                  setCustomerAddress(e.target.value)
+                  setQuote(null)
+                }}
+                rows={3}
+                name="customer_address"
+                autoComplete="street-address"
+                placeholder="Street, city, state, ZIP"
+                required
+              />
+              <span className="muted small">
+                Used for billing, contract, and tax purposes.
+              </span>
+            </label>
+            {item.delivery_available ? (
+              <fieldset className="field field-span booking-transport-fieldset">
+                <legend className="field-label">Transport options</legend>
+                <label className="field field-checkbox field-span booking-transport-radio">
                   <input
-                    type="text"
-                    name="delivery_address"
-                    value={deliveryAddress}
-                    onChange={(e) => {
-                      setDeliveryAddress(e.target.value)
+                    type="radio"
+                    name="transport_self"
+                    checked={!deliverToSite && !pickupFromSite}
+                    onChange={() => {
+                      setDeliverToSite(false)
+                      setPickupFromSite(false)
                       setQuote(null)
+                      setLogisticsAddressError(null)
                     }}
-                    autoComplete="off"
-                    placeholder="Where the equipment should be delivered"
                   />
+                  <span>I will pick up and return the trailer</span>
                 </label>
-              ) : null}
-            </>
-          ) : null}
-          <label className="field field-span">
-            <span className="field-label">Notes (optional)</span>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-          </label>
-          <label className="field field-span">
-            <span className="field-label">Company / contractor name (optional)</span>
-            <input
-              type="text"
-              name="customer_company"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              autoComplete="section-booking organization"
-            />
-          </label>
-          <label className="field field-checkbox field-span">
-            <input
-              type="checkbox"
-              checked={requestAck}
-              onChange={(e) => setRequestAck(e.target.checked)}
-            />
-            <span>
-              I understand this is a <strong>request</strong>, not a confirmed reservation, until the
-              rental team approves it.
-            </span>
-          </label>
-        </div>
-        {quoteError && <p className="error-msg">{quoteError}</p>}
-        {submitOk && <p className="success-msg">{submitOk}</p>}
-        <div className="booking-actions">
-          <button
-            type="button"
-            className={`btn ${quoting ? 'btn-primary btn-loading' : 'btn-secondary'}`}
-            onClick={getQuote}
-            disabled={quoting}
-            aria-busy={quoting}
-          >
-            {quoting ? (
-              <>
-                <svg
-                  className="btn-spinner"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  aria-hidden={true}
-                >
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    opacity="0.25"
+                <label className="field field-checkbox field-span">
+                  <input
+                    type="checkbox"
+                    checked={deliverToSite}
+                    onChange={(e) => {
+                      setDeliverToSite(e.target.checked)
+                      setQuote(null)
+                      setLogisticsAddressError(null)
+                    }}
                   />
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeDasharray="48"
-                    strokeDashoffset="36"
+                  <span>Deliver trailer to my site</span>
+                </label>
+                <label className="field field-checkbox field-span">
+                  <input
+                    type="checkbox"
+                    checked={pickupFromSite}
+                    onChange={(e) => {
+                      setPickupFromSite(e.target.checked)
+                      setQuote(null)
+                      setLogisticsAddressError(null)
+                    }}
                   />
-                </svg>
-                Getting quote…
-              </>
-            ) : (
-              'Get quote'
-            )}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={submitRequest}
-            disabled={
-              quoting ||
-              submitting ||
-              !quote ||
-              !driversLicenseFile ||
-              (item.towable ? !licensePlateFile : false) ||
-              !email.trim() ||
-              phone.trim().length < 7 ||
-              !firstName.trim() ||
-              !lastName.trim() ||
-              !address.trim() ||
-              !requestAck ||
-              (item.delivery_available && deliveryRequested && !deliveryAddress.trim())
-            }
-          >
-            {submitting ? 'Sending…' : 'Submit Booking'}
-          </button>
-        </div>
-        </form>
-        {quote && (
-          <div className="quote card card-pad">
-            <h3>Quote</h3>
-            {quote.email_sent ? (
-              <p className="success-msg small">We emailed this quote to {email.trim()}.</p>
-            ) : (
-              <p className="muted small">
-                Quote not emailed — configure SMTP on the API (see backend README) to receive it by
-                email.
-              </p>
-            )}
-            <ul className="quote-lines">
-              <li>
-                <span>Days</span>
-                <span>{quote.num_days}</span>
-              </li>
-              <li>
-                <span>Rental subtotal</span>
-                <span>{money(quote.discounted_subtotal)}</span>
-              </li>
-              {quote.delivery_fee != null && Number(quote.delivery_fee) > 0 ? (
-                <li>
-                  <span>
-                    Delivery
-                    {quote.delivery_distance_miles != null &&
-                    quote.delivery_distance_miles !== '' ? (
-                      <span className="muted">
-                        {' '}
-                        (~{Number(quote.delivery_distance_miles)} mi one-way)
-                      </span>
+                  <span>Pick up trailer from my site after rental</span>
+                </label>
+                <p className="muted small field-span">
+                  Logistics availability and final pricing will be reviewed before approval.
+                </p>
+                {(deliverToSite || pickupFromSite) ? (
+                  <label className="field field-span">
+                    <span className="field-label">Job site address</span>
+                    <input
+                      type="text"
+                      name="job_site_address"
+                      id="booking-job-site-address"
+                      value={logisticsAddress}
+                      onChange={(e) => {
+                        setLogisticsAddress(e.target.value)
+                        setQuote(null)
+                        setLogisticsAddressError(null)
+                      }}
+                      autoComplete="street-address"
+                      placeholder="Street, city, state, ZIP"
+                      aria-invalid={logisticsAddressError ? true : undefined}
+                      aria-describedby={
+                        logisticsAddressError
+                          ? 'logistics-address-hint logistics-address-error'
+                          : 'logistics-address-hint'
+                      }
+                    />
+                    <span id="logistics-address-hint" className="muted small">
+                      Used for delivery and/or pickup routing.
+                    </span>
+                    {logisticsAddressError ? (
+                      <p id="logistics-address-error" className="logistics-address-error" role="alert">
+                        {logisticsAddressError}
+                      </p>
                     ) : null}
-                  </span>
-                  <span>{money(quote.delivery_fee)}</span>
-                </li>
-              ) : null}
-              <li>
-                <span>
-                  Sales tax ({Number(quote.sales_tax_rate_percent)}%)
-                </span>
-                <span>{money(quote.sales_tax_amount)}</span>
-              </li>
-              <li>
-                <span>Rental total (with tax)</span>
-                <span>{money(quote.rental_total_with_tax)}</span>
-              </li>
-              <li>
-                <span>Deposit (hold)</span>
-                <span>{money(quote.deposit_amount)}</span>
-              </li>
-            </ul>
+                  </label>
+                ) : null}
+              </fieldset>
+            ) : null}
+            <label className="field field-span">
+              <span className="field-label">Notes (optional)</span>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                name="booking_notes"
+                placeholder="Example: Deliver 8–10am on start date; pickup after 3pm on return date (we’ll confirm)."
+              />
+              <span className="muted small">
+                If you chose delivery or pickup from your site, note your requested delivery time and pickup
+                time here — we’ll confirm when we approve your request.
+              </span>
+            </label>
+            <label className="field field-span">
+              <span className="field-label">Company / contractor name (optional)</span>
+              <input
+                type="text"
+                name="customer_company"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                autoComplete="section-booking organization"
+              />
+            </label>
+            <p className="muted small field-span tight-top">
+              This is a request, not a confirmed reservation until we approve it.
+            </p>
           </div>
-        )}
+          {quoteError ? <p className="error-msg booking-form-alert">{quoteError}</p> : null}
+          <div className="quote card card-pad">
+            <h3>Estimate</h3>
+            {quoting ? <p className="muted small">Updating your estimate...</p> : null}
+            {quote ? (
+              <>
+                <ul className="quote-lines">
+                  <li>
+                    <span>Days</span>
+                    <span>{quote.num_days}</span>
+                  </li>
+                  <li>
+                    <span>Rental (estimated)</span>
+                    <span>{money(quote.discounted_subtotal)}</span>
+                  </li>
+                  {quote.delivery_fee != null && Number(quote.delivery_fee) > 0 ? (
+                    <li>
+                      <span>
+                        Delivery (estimated)
+                        {quote.delivery_distance_miles != null &&
+                        quote.delivery_distance_miles !== '' ? (
+                          <span className="muted">
+                            {' '}
+                            (~{Number(quote.delivery_distance_miles)} mi one-way)
+                          </span>
+                        ) : null}
+                      </span>
+                      <span>{money(quote.delivery_fee)}</span>
+                    </li>
+                  ) : null}
+                  {quote.pickup_fee != null && Number(quote.pickup_fee) > 0 ? (
+                    <li>
+                      <span>
+                        Pickup (estimated)
+                        {quote.pickup_distance_miles != null &&
+                        quote.pickup_distance_miles !== '' ? (
+                          <span className="muted">
+                            {' '}
+                            (~{Number(quote.pickup_distance_miles)} mi one-way)
+                          </span>
+                        ) : null}
+                      </span>
+                      <span>{money(quote.pickup_fee)}</span>
+                    </li>
+                  ) : null}
+                  <li>
+                    <span>Subtotal (before tax)</span>
+                    <span>
+                      {money(
+                        String(
+                          Number(quote.discounted_subtotal) +
+                            Number(quote.delivery_fee || 0) +
+                            Number(quote.pickup_fee || 0),
+                        ),
+                      )}
+                    </span>
+                  </li>
+                  <li>
+                    <span>Sales tax ({Number(quote.sales_tax_rate_percent)}%)</span>
+                    <span>{money(quote.sales_tax_amount)}</span>
+                  </li>
+                  <li>
+                    <span>Total (estimated, with tax)</span>
+                    <span>{money(quote.rental_total_with_tax)}</span>
+                  </li>
+                  <li>
+                    <span>Deposit (hold)</span>
+                    <span>{money(quote.deposit_amount)}</span>
+                  </li>
+                </ul>
+                <p className="muted small quote-logistics-note">
+                  Final logistics pricing confirmed after approval.
+                </p>
+              </>
+            ) : !quoting && !authBlocksSubmit ? (
+              <p className="muted small">Enter dates and your email to see pricing.</p>
+            ) : !quoting && authBlocksSubmit ? (
+              <p className="muted small">Sign in to see pricing for your dates.</p>
+            ) : null}
+          </div>
+          <p className="muted small field-span booking-step1-cta-hint">
+            Request your dates — we’ll review and confirm availability shortly.
+          </p>
+          {submitting ? (
+            <div className="booking-submit-status field-span card card-pad" aria-live="polite">
+              <p className="booking-submit-status-title">Requesting your booking…</p>
+              <p className="muted small">This usually takes a few seconds.</p>
+              <ul className="booking-submit-checklist">
+                <li
+                  className={
+                    submitPhase === 'saving'
+                      ? 'active'
+                      : submitPhase === 'email' || submitPhase === 'redirect'
+                        ? 'done'
+                        : undefined
+                  }
+                >
+                  Saving your request…
+                </li>
+                <li
+                  className={
+                    submitPhase === 'email'
+                      ? 'active'
+                      : submitPhase === 'redirect'
+                        ? 'done'
+                        : undefined
+                  }
+                >
+                  Sending confirmation to your email…
+                </li>
+                <li className={submitPhase === 'redirect' ? 'active' : undefined}>
+                  Opening the next step…
+                </li>
+              </ul>
+            </div>
+          ) : null}
+          <div className="booking-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void submitRequest()}
+              disabled={
+                quoting ||
+                submitting ||
+                authBlocksSubmit ||
+                !quote ||
+                !email.trim() ||
+                phone.trim().length < 7 ||
+                !firstName.trim() ||
+                !lastName.trim() ||
+                !customerAddress.trim() ||
+                (item.delivery_available &&
+                  (deliverToSite || pickupFromSite) &&
+                  !logisticsAddress.trim())
+              }
+            >
+              {submitting ? 'Sending…' : 'Request booking'}
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   )

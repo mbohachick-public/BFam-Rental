@@ -1,3 +1,5 @@
+/* Provider + hook exported together; Vite fast refresh prefers one component export. */
+/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
   useContext,

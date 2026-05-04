@@ -235,6 +235,145 @@ def test_stripe_webhook_marks_rental_paid(client, fake_settings, db_store, seed_
     assert r2.json().get("duplicate") is True
 
 
+def test_stripe_webhook_sends_customer_completion_email_when_signed_and_rental_paid_no_deposit(
+    client, fake_settings, db_store, seed_item, monkeypatch
+):
+    fake_settings.stripe_webhook_secret = "whsec_test"
+    fake_settings.smtp_host = "smtp.test"
+    fake_settings.smtp_from = "ops@test.com"
+
+    email_calls: list[dict] = []
+
+    def _capture_email(*_args, **kwargs):
+        email_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "app.services.quote_email.send_customer_booking_fully_complete_email",
+        _capture_email,
+    )
+    monkeypatch.setattr("app.routers.stripe_webhook.try_notify_admin_confirm_needed", lambda *a, **k: None)
+
+    item = seed_item()
+    bid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item["id"],
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-02",
+            "status": "approved_pending_payment",
+            "rental_paid_at": None,
+            "rental_payment_status": "unpaid",
+            "agreement_signed_at": "2026-04-01T00:00:00+00:00",
+            "customer_email": "done@test.com",
+            "rental_total_with_tax": 100.0,
+            "deposit_amount": 0.0,
+        }
+    )
+
+    def _construct(*_args, **_kwargs):
+        return {
+            "id": "evt_customer_complete_1",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_rental_done",
+                    "payment_status": "paid",
+                    "metadata": {"booking_id": bid, "checkout_kind": "rental"},
+                    "payment_intent": "pi_done_1",
+                }
+            },
+        }
+
+    monkeypatch.setattr("app.routers.stripe_webhook.stripe.Webhook.construct_event", _construct)
+    r = client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "t=0,v1=fake"})
+    assert r.status_code == 200
+    row = next(rw for rw in db_store["booking_requests"] if rw["id"] == bid)
+    assert row["status"] == "confirmed"
+    assert len(email_calls) == 1
+    assert email_calls[0]["to_addr"] == "done@test.com"
+
+
+def test_stripe_webhook_holds_customer_email_until_deposit_when_deposit_required(
+    client, fake_settings, db_store, seed_item, monkeypatch
+):
+    fake_settings.stripe_webhook_secret = "whsec_test"
+    fake_settings.smtp_host = "smtp.test"
+    fake_settings.smtp_from = "ops@test.com"
+
+    email_calls: list[dict] = []
+
+    def _capture_email(*_args, **kwargs):
+        email_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "app.services.quote_email.send_customer_booking_fully_complete_email",
+        _capture_email,
+    )
+    monkeypatch.setattr("app.routers.stripe_webhook.try_notify_admin_confirm_needed", lambda *a, **k: None)
+
+    item = seed_item()
+    bid = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item["id"],
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-02",
+            "status": "approved_pending_payment",
+            "rental_paid_at": None,
+            "rental_payment_status": "unpaid",
+            "deposit_secured_at": None,
+            "agreement_signed_at": "2026-04-01T00:00:00+00:00",
+            "customer_email": "dep@test.com",
+            "rental_total_with_tax": 100.0,
+            "deposit_amount": 50.0,
+        }
+    )
+
+    def _construct_rental(*_args, **_kwargs):
+        return {
+            "id": "evt_rent_only",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_rent_only",
+                    "payment_status": "paid",
+                    "metadata": {"booking_id": bid, "checkout_kind": "rental"},
+                    "payment_intent": "pi_r",
+                }
+            },
+        }
+
+    monkeypatch.setattr("app.routers.stripe_webhook.stripe.Webhook.construct_event", _construct_rental)
+    r1 = client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "t=0,v1=fake"})
+    assert r1.status_code == 200
+    assert email_calls == []
+
+    def _construct_dep(*_args, **_kwargs):
+        return {
+            "id": "evt_dep_only",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_dep_only",
+                    "payment_status": "paid",
+                    "metadata": {"booking_id": bid, "checkout_kind": "deposit"},
+                    "payment_intent": "pi_d",
+                }
+            },
+        }
+
+    monkeypatch.setattr("app.routers.stripe_webhook.stripe.Webhook.construct_event", _construct_dep)
+    r2 = client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "t=0,v1=fake2"})
+    assert r2.status_code == 200
+    assert len(email_calls) == 1
+    row_d = next(rw for rw in db_store["booking_requests"] if rw["id"] == bid)
+    assert row_d["status"] == "confirmed"
+
+
 def test_admin_stripe_checkout_session(client, admin_headers, fake_settings, db_store, seed_item, monkeypatch):
     fake_settings.stripe_secret_key = "sk_test_fake"
     calls: list[dict] = []

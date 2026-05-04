@@ -101,25 +101,28 @@ def fetch_road_distance_miles(settings: Settings, *, origin: str, destination: s
     return miles
 
 
-def compute_delivery_charge(
+def compute_logistics_charges(
     client,
     settings: Settings,
     *,
     item_delivery_available: bool,
     delivery_requested: bool,
-    delivery_address: str | None,
-) -> tuple[Decimal, Decimal | None]:
+    pickup_from_site_requested: bool,
+    logistics_address: str | None,
+) -> tuple[Decimal, Decimal | None, Decimal, Decimal | None]:
     """
-    Returns (delivery_fee, road_miles or None).
-    When not requested or item has no delivery, returns (0, None).
+    Returns (delivery_fee, delivery_miles, pickup_fee, pickup_miles).
+    Each leg uses the same one-way road miles (depot → job site); fees are computed per leg when that service is requested.
     """
-    if not delivery_requested:
-        return Decimal("0"), None
+    if not delivery_requested and not pickup_from_site_requested:
+        return Decimal("0"), None, Decimal("0"), None
     if not item_delivery_available:
-        raise ValueError("This item does not offer delivery.")
-    addr = (delivery_address or "").strip()
+        raise ValueError("This item does not offer delivery or pickup from your site.")
+    addr = (logistics_address or "").strip()
     if not addr:
-        raise ValueError("Delivery address is required when delivery is requested.")
+        raise ValueError(
+            "Job site address is required when delivery or pickup from site is selected."
+        )
 
     row = load_delivery_settings_row(client)
     if not bool(row.get("enabled")):
@@ -135,9 +138,33 @@ def compute_delivery_charge(
         cap = Decimal(str(max_m))
         if miles > cap:
             raise ValueError(
-                f"Delivery address is outside the maximum service distance ({cap} miles). "
+                f"Job site address is outside the maximum service distance ({cap} miles). "
                 "Contact the rental office."
             )
 
-    fee = fee_from_miles(miles, row)
-    return fee, miles
+    leg_fee = fee_from_miles(miles, row)
+    delivery_fee = leg_fee if delivery_requested else Decimal("0")
+    delivery_miles = miles if delivery_requested else None
+    pickup_fee = leg_fee if pickup_from_site_requested else Decimal("0")
+    pickup_miles = miles if pickup_from_site_requested else None
+    return delivery_fee, delivery_miles, pickup_fee, pickup_miles
+
+
+def compute_delivery_charge(
+    client,
+    settings: Settings,
+    *,
+    item_delivery_available: bool,
+    delivery_requested: bool,
+    delivery_address: str | None,
+) -> tuple[Decimal, Decimal | None]:
+    """Backward-compatible: delivery only, no pickup-from-site leg."""
+    d, dm, _p, _pm = compute_logistics_charges(
+        client,
+        settings,
+        item_delivery_available=item_delivery_available,
+        delivery_requested=delivery_requested,
+        pickup_from_site_requested=False,
+        logistics_address=delivery_address,
+    )
+    return d, dm

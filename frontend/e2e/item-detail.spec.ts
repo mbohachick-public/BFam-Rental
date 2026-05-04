@@ -66,14 +66,10 @@ test.describe('Item detail page', () => {
     await prevBtn.click()
   })
 
-  test('booking form: requires email to get a quote', async ({ page }) => {
+  test('booking form: estimate prompts for dates and email', async ({ page }) => {
     await page.goto(`/items/${itemId}`)
-    // Try to get quote without filling email
-    const quoteBtn = page.getByRole('button', { name: /get quote/i })
-    if (await quoteBtn.isVisible()) {
-      await quoteBtn.click()
-      await expect(page.getByText(/email/i)).toBeVisible()
-    }
+    await expect(page.getByRole('heading', { name: /estimate/i })).toBeVisible()
+    await expect(page.getByText(/enter dates and your email to see pricing/i)).toBeVisible()
   })
 
   test('booking form: requires driver license to submit', async ({ page }) => {

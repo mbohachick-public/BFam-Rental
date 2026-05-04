@@ -20,4 +20,23 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['e2e/**/*.ts'],
+    rules: {
+      /* Playwright fixtures use a `use` callback; `{}` fixtures are intentional in beforeAll hooks. */
+      'no-empty-pattern': 'off',
+      'react-hooks/rules-of-hooks': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
+    files: ['src/context/AdminSessionContext.tsx'],
+    rules: {
+      /* Reset + loading flags on auth transitions are synchronous by design until async session resolves */
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
 ])

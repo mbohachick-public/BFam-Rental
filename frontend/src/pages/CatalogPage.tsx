@@ -65,31 +65,35 @@ export function CatalogPage() {
     }
   }, [])
 
+  const listBlocked = dateFilterInvalid || dateRangeReversed
+
   useEffect(() => {
-    if (dateFilterInvalid || dateRangeReversed) {
-      setItems([])
-      setLoading(false)
-      setError(null)
-      return
-    }
+    if (listBlocked) return
 
     let cancelled = false
-    setLoading(true)
-    setError(null)
-    apiGet<ItemSummary[]>(`/items${query}`)
-      .then((data) => {
-        if (!cancelled) setItems(data)
-      })
-      .catch((e: Error) => {
-        if (!cancelled) setError(e.message)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+    queueMicrotask(() => {
+      if (cancelled) return
+      setLoading(true)
+      setError(null)
+      apiGet<ItemSummary[]>(`/items${query}`)
+        .then((data) => {
+          if (!cancelled) setItems(data)
+        })
+        .catch((e: Error) => {
+          if (!cancelled) setError(e.message)
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    })
     return () => {
       cancelled = true
     }
-  }, [query, dateFilterInvalid, dateRangeReversed])
+  }, [query, listBlocked])
+
+  const displayItems = listBlocked ? [] : items
+  const displayLoading = listBlocked ? false : loading
+  const displayError = listBlocked ? null : error
 
   return (
     <div className="container page-catalog">
@@ -238,19 +242,16 @@ export function CatalogPage() {
         </form>
       </details>
 
-      {loading && !dateFilterInvalid && !dateRangeReversed && (
-        <p className="muted">Loading…</p>
-      )}
-      {error && <p className="error-msg">{error}</p>}
+      {displayLoading && <p className="muted">Loading…</p>}
+      {displayError && <p className="error-msg">{displayError}</p>}
 
-      {!loading &&
-        !error &&
-        !dateFilterInvalid &&
-        !dateRangeReversed &&
-        items.length === 0 && <p className="muted">No items match. Try clearing filters.</p>}
+      {!displayLoading &&
+        !displayError &&
+        !listBlocked &&
+        displayItems.length === 0 && <p className="muted">No items match. Try clearing filters.</p>}
 
       <ul className="catalog-grid">
-        {items.map((item) => (
+        {displayItems.map((item) => (
           <li key={item.id}>
             <Link to={`/items/${item.id}`} className="catalog-card card">
               <div className="catalog-thumb">

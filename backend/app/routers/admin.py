@@ -45,7 +45,13 @@ from app.services.item_images_storage import (
     try_delete_item_image_for_url,
 )
 from app.services.e2e_cleanup import cleanup_e2e_test_items
-from app.services.admin_notify import try_notify_admin_confirm_needed
+from app.services.admin_notify import (
+    CUSTOMER_BOOKING_COMPLETE_EMAIL_EVENT,
+    booking_event_exists,
+    try_finalize_booking_after_obligations_complete,
+    try_notify_admin_confirm_needed,
+)
+from app.services.booking_confirmation import apply_booking_confirmation
 from app.services.booking_events import log_booking_event
 from app.services.contract_signing import create_signing_package, signing_url
 from app.services.delivery_pricing import load_delivery_settings_row
@@ -56,6 +62,7 @@ from app.services.quote_email import (
     send_stripe_checkout_ready_email,
 )
 from app.services.stripe_checkout import create_checkout_session_for_booking
+from app.services.stripe_customer_setup import stripe_payment_collection_enabled
 from app.services.stripe_deposit_refund import refund_stripe_deposit_for_booking
 from app.services.stripe_payment_reconcile import sync_booking_checkout_sessions_from_stripe
 
@@ -99,6 +106,7 @@ def _try_create_card_checkout_sessions(
 _APPROVABLE_STATUSES = frozenset(
     {
         BookingRequestStatus.requested.value,
+        BookingRequestStatus.pending_approval.value,
         BookingRequestStatus.under_review.value,
         BookingRequestStatus.pending.value,
     }
@@ -107,6 +115,7 @@ _APPROVABLE_STATUSES = frozenset(
 _DECLINABLE_STATUSES = frozenset(
     {
         BookingRequestStatus.requested.value,
+        BookingRequestStatus.pending_approval.value,
         BookingRequestStatus.under_review.value,
         BookingRequestStatus.pending.value,
         BookingRequestStatus.approved_awaiting_signature.value,
@@ -114,6 +123,57 @@ _DECLINABLE_STATUSES = frozenset(
         BookingRequestStatus.approved_pending_check_clearance.value,
     }
 )
+
+
+def _enforce_owner_approve_gates(client: Client, settings, row: dict) -> None:
+    """Block approve until required customer funnel data exists."""
+    st = str(row.get("status") or "")
+    has_dl = bool(row.get("drivers_license_path"))
+
+    if st == BookingRequestStatus.requested.value and not has_dl:
+        raise HTTPException(
+            status_code=400,
+            detail="Approve blocked until the customer finishes Step 2 (complete-your-request flow).",
+        )
+
+    if st != BookingRequestStatus.pending_approval.value:
+        return
+
+    item_res = (
+        client.table("items")
+        .select("towable")
+        .eq("id", row["item_id"])
+        .limit(1)
+        .execute()
+    )
+    tw = bool((item_res.data or [{}])[0].get("towable"))
+    if not has_dl:
+        raise HTTPException(status_code=400, detail="Driver license must be uploaded before approval.")
+    if not (row.get("customer_address") or "").strip():
+        raise HTTPException(status_code=400, detail="Customer address is missing.")
+    if tw and not row.get("vehicle_tow_capable_ack"):
+        raise HTTPException(status_code=400, detail="Tow vehicle acknowledgement is incomplete.")
+    req_ok = bool(row.get("request_approval_acknowledged"))
+    legacy_terms_flag = bool(row.get("agreement_terms_acknowledged"))
+    if not req_ok and not legacy_terms_flag:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer must confirm request-for-approval acknowledgment (complete Step 2).",
+        )
+
+    dep_need = False
+    try:
+        dep_need = row.get("deposit_amount") is not None and Decimal(str(row.get("deposit_amount") or "0")) > 0
+    except Exception:
+        dep_need = bool(row.get("deposit_amount"))
+    if stripe_payment_collection_enabled(settings) and dep_need:
+        pm = str(row.get("stripe_saved_payment_method_id") or "").strip()
+        if not pm.startswith("pm_"):
+            raise HTTPException(
+                status_code=400,
+                detail="Approve blocked — customer must save a card on Step 2 when Stripe deposits are enabled.",
+            )
+
 
 _PRE_CONFIRM_APPROVED = frozenset(
     {
@@ -457,8 +517,9 @@ def admin_approve_booking(
     if st not in _APPROVABLE_STATUSES:
         raise HTTPException(
             status_code=400,
-            detail="Only requested / under_review / legacy pending bookings can be approved.",
+            detail="Only requested / pending approval / under_review / legacy pending bookings can be approved.",
         )
+    _enforce_owner_approve_gates(client, settings, row)
     item_res = (
         client.table("items")
         .select("title")
@@ -730,6 +791,7 @@ def admin_mark_rental_paid(
     ).eq("id", request_id).execute()
     log_booking_event(client, booking_id=request_id, event_type="rental_paid_marked", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
+    try_finalize_booking_after_obligations_complete(client, settings, request_id)
     try_notify_admin_confirm_needed(client, settings, request_id)
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
@@ -751,7 +813,9 @@ def admin_mark_deposit_secured(
     client.table("booking_requests").update({"deposit_secured_at": _now_iso()}).eq("id", request_id).execute()
     log_booking_event(client, booking_id=request_id, event_type="deposit_secured_marked", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
-    try_notify_admin_confirm_needed(client, get_settings(), request_id)
+    stg = get_settings()
+    try_finalize_booking_after_obligations_complete(client, stg, request_id)
+    try_notify_admin_confirm_needed(client, stg, request_id)
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 
@@ -772,7 +836,9 @@ def admin_mark_agreement_signed(
     client.table("booking_requests").update({"agreement_signed_at": _now_iso()}).eq("id", request_id).execute()
     log_booking_event(client, booking_id=request_id, event_type="agreement_signed_marked", actor_type="admin")
     res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
-    try_notify_admin_confirm_needed(client, get_settings(), request_id)
+    stg = get_settings()
+    try_finalize_booking_after_obligations_complete(client, stg, request_id)
+    try_notify_admin_confirm_needed(client, stg, request_id)
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 
@@ -810,22 +876,12 @@ def admin_confirm_booking(
             status_code=400,
             detail=f"Confirm blocked until marked: {', '.join(missing)}.",
         )
-    item_id = row["item_id"]
-    start = date.fromisoformat(str(row["start_date"]))
-    end = date.fromisoformat(str(row["end_date"]))
-    days = iter_days_inclusive(start, end)
-    upsert_rows = [
-        {"item_id": item_id, "day": d.isoformat(), "status": DayStatus.booked.value} for d in days
-    ]
-    if upsert_rows:
-        client.table("item_day_status").upsert(upsert_rows).execute()
-    client.table("booking_requests").update({"status": BookingRequestStatus.confirmed.value}).eq(
-        "id", request_id
-    ).execute()
-    log_booking_event(client, booking_id=request_id, event_type="confirmed", actor_type="admin")
-    res2 = client.table("booking_requests").select("*").eq("id", request_id).limit(1).execute()
-    try_send_pickup_instructions_after_confirm(client, get_settings(), res2.data[0])
-    return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
+    confirmed = apply_booking_confirmation(client, row, actor_type="admin")
+    if not confirmed:
+        raise HTTPException(status_code=500, detail="Could not confirm booking.")
+    if not booking_event_exists(client, request_id, CUSTOMER_BOOKING_COMPLETE_EMAIL_EVENT):
+        try_send_pickup_instructions_after_confirm(client, get_settings(), confirmed)
+    return booking_out_from_row(client, confirmed, sign_document_urls=True)
 
 
 @router.post("/booking-requests/{request_id}/decline", response_model=BookingRequestOut)

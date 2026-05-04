@@ -320,6 +320,8 @@ def _make_fake_settings():
     s.public_app_base_url = MagicMock(return_value="http://localhost:5173")
     s.google_maps_api_key = ""
     s.google_maps_http_timeout_sec = 12.0
+    s.stripe_publishable_key = ""
+    s.damage_waiver_per_day_usd = "15.00"
     return s
 
 

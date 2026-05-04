@@ -33,6 +33,23 @@ function isRequestedLike(status: string) {
   return status === 'requested' || status === 'pending' || status === 'under_review'
 }
 
+/** Matches backend `_APPROVABLE_STATUSES` plus Step 2: `requested` without a license stays non-approvable until customer completes verification. */
+function canAdminApproveBooking(r: BookingRequestOut): boolean {
+  const s = r.status
+  if (
+    s !== 'requested' &&
+    s !== 'pending_approval' &&
+    s !== 'pending' &&
+    s !== 'under_review'
+  ) {
+    return false
+  }
+  if (s === 'requested' && !r.drivers_license_url) {
+    return false
+  }
+  return true
+}
+
 function isPreConfirmApproved(status: string) {
   return status === 'approved_pending_payment' || status === 'approved_pending_check_clearance'
 }
@@ -301,8 +318,11 @@ export function AdminBookingsPage() {
       <ul className="admin-table-list card">
         {rows.map((r) => {
           const canDecline =
-            isRequestedLike(r.status) || isAwaitingSignature(r.status) || isPreConfirmApproved(r.status)
-          const canApprove = isRequestedLike(r.status)
+            r.status === 'pending_approval' ||
+            isRequestedLike(r.status) ||
+            isAwaitingSignature(r.status) ||
+            isPreConfirmApproved(r.status)
+          const canApprove = canAdminApproveBooking(r)
           const canMark = isPreConfirmApproved(r.status)
           const signUrl = signingUrlById[r.id] ?? r.signing_url ?? null
           const depositAmountNum = r.deposit_amount != null ? Number(r.deposit_amount) : 0
@@ -354,6 +374,9 @@ export function AdminBookingsPage() {
                 <div className="small admin-decline-reason">
                   <strong>Decline reason:</strong> {r.decline_reason}
                 </div>
+              ) : null}
+              {r.status === 'requested' && !r.drivers_license_url ? (
+                <div className="muted small">Awaiting customer Step 2 (complete request).</div>
               ) : null}
               {isAwaitingSignature(r.status) ? (
                 <div className="muted small admin-awaiting-signature">

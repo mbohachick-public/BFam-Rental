@@ -169,6 +169,14 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+/** GET binary for /booking-requests paths with customer Bearer (My rentals documents). */
+export async function bookingDownloadBlob(path: string): Promise<Blob> {
+  const p = path.startsWith('/') ? path : `/${path}`
+  const res = await fetchBookingRequestsWithAuthRetry(p, { method: 'GET' })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.blob()
+}
+
 /** GET without customer/admin auth (e.g. tokenized signing links). */
 export async function apiGetPublic<T>(path: string): Promise<T> {
   const res = await apiFetch(`${baseUrl()}${path}`, { method: 'GET' })

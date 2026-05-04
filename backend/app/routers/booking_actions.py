@@ -20,8 +20,6 @@ from app.services.contract_signing import (
     load_token_row_by_raw,
     resolve_sign_token,
 )
-from app.services.quote_email import send_signature_completed_email
-
 router = APIRouter(prefix="/booking-actions", tags=["booking-actions"])
 
 
@@ -32,18 +30,6 @@ def _client_ip(request: Request) -> str | None:
     if request.client:
         return request.client.host
     return None
-
-
-def _item_title(client: Client, booking_id: str) -> str:
-    rows = (
-        client.table("booking_requests").select("item_id").eq("id", booking_id).limit(1).execute().data
-        or []
-    )
-    if not rows:
-        return "Rental item"
-    iid = rows[0].get("item_id")
-    it = client.table("items").select("title").eq("id", iid).limit(1).execute().data or []
-    return str(it[0].get("title") or "Rental item") if it else "Rental item"
 
 
 @router.get("/{token}/sign", response_model=BookingSignPageOut)
@@ -141,25 +127,6 @@ def post_sign_page(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This booking was already signed.")
     if not result.get("ok"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not record signature.")
-    bid = str(result["booking_id"])
-    row_mail = (
-        client.table("booking_requests")
-        .select("customer_email")
-        .eq("id", bid)
-        .limit(1)
-        .execute()
-        .data
-        or [{}]
-    )[0]
-    to_addr = row_mail.get("customer_email")
-    if to_addr:
-        send_signature_completed_email(
-            settings,
-            to_addr=str(to_addr).strip(),
-            item_title=_item_title(client, bid),
-            next_status=str(result.get("next_status") or ""),
-            pdf_path=result.get("pdf_path"),
-        )
     return BookingSignResultOut(
         ok=True,
         next_status=str(result.get("next_status") or ""),

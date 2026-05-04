@@ -4,8 +4,8 @@ from decimal import Decimal
 from supabase import Client
 
 from app.config import get_settings
-from app.schemas import BookingRequestOut, BookingRequestStatus, RentalPaymentStatus
-from app.services.booking_storage import admin_document_view_urls
+from app.schemas import BookingRequestOut, BookingRequestStatus, DepositAuthorizationStatus, RentalPaymentStatus
+from app.services.booking_storage import admin_document_view_urls, customer_document_view_urls
 
 
 def _dec(v: object | None) -> Decimal | None:
@@ -31,17 +31,35 @@ def _rental_payment_status(row: dict) -> RentalPaymentStatus:
     return RentalPaymentStatus.paid if row.get("rental_paid_at") else RentalPaymentStatus.unpaid
 
 
+def _deposit_auth_status(row: dict) -> DepositAuthorizationStatus | None:
+    raw = row.get("deposit_authorization_status")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        return DepositAuthorizationStatus(s)
+    except ValueError:
+        return None
+
+
 def booking_out_from_row(
     client: Client,
     row: dict,
     *,
     sign_document_urls: bool,
+    customer_portal_document_urls: bool = False,
     decline_email_sent: bool | None = None,
     signing_url: str | None = None,
 ) -> BookingRequestOut:
     dl_url = lp_url = ins_url = None
     if sign_document_urls:
-        dl_url, lp_url, ins_url = admin_document_view_urls(get_settings(), client, row)
+        settings = get_settings()
+        if customer_portal_document_urls:
+            dl_url, lp_url, ins_url = customer_document_view_urls(settings, client, row)
+        else:
+            dl_url, lp_url, ins_url = admin_document_view_urls(settings, client, row)
     hb = row.get("has_brake_controller")
     has_brake = bool(hb) if hb is not None else None
     return BookingRequestOut(
@@ -79,6 +97,13 @@ def booking_out_from_row(
         ),
         delivery_fee=_dec(row.get("delivery_fee")),
         delivery_distance_miles=_dec(row.get("delivery_distance_miles")),
+        pickup_from_site_requested=(
+            None
+            if row.get("pickup_from_site_requested") is None
+            else bool(row.get("pickup_from_site_requested"))
+        ),
+        pickup_fee=_dec(row.get("pickup_fee")),
+        pickup_distance_miles=_dec(row.get("pickup_distance_miles")),
         payment_method_preference=_str_opt(row.get("payment_method_preference")),
         is_repeat_contractor=row.get("is_repeat_contractor")
         if row.get("is_repeat_contractor") is not None
@@ -114,5 +139,36 @@ def booking_out_from_row(
         stripe_deposit_checkout_url=_str_opt(row.get("stripe_deposit_checkout_url")),
         stripe_deposit_checkout_created_at=_str_opt(row.get("stripe_deposit_checkout_created_at")),
         stripe_deposit_payment_intent_id=_str_opt(row.get("stripe_deposit_payment_intent_id")),
+        agreement_terms_acknowledged=(
+            None
+            if row.get("agreement_terms_acknowledged") is None
+            else bool(row.get("agreement_terms_acknowledged"))
+        ),
+        request_approval_acknowledged=(
+            None
+            if row.get("request_approval_acknowledged") is None
+            else bool(row.get("request_approval_acknowledged"))
+        ),
+        agreement_sign_intent_acknowledged=(
+            None
+            if row.get("agreement_sign_intent_acknowledged") is None
+            else bool(row.get("agreement_sign_intent_acknowledged"))
+        ),
+        vehicle_tow_capable_ack=(
+            None
+            if row.get("vehicle_tow_capable_ack") is None
+            else bool(row.get("vehicle_tow_capable_ack"))
+        ),
+        damage_waiver_selected=(
+            None
+            if row.get("damage_waiver_selected") is None
+            else bool(row.get("damage_waiver_selected"))
+        ),
+        damage_waiver_daily_amount=_dec(row.get("damage_waiver_daily_amount")),
+        damage_waiver_line_total=_dec(row.get("damage_waiver_line_total")),
+        rental_subtotal_snapshot=_dec(row.get("rental_subtotal_snapshot")),
+        stripe_saved_payment_method_id=_str_opt(row.get("stripe_saved_payment_method_id")),
+        deposit_authorization_status=_deposit_auth_status(row),
+        verification_submitted_at=_str_opt(row.get("verification_submitted_at")),
         signing_url=signing_url,
     )

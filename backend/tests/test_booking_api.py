@@ -26,6 +26,10 @@ def _future(d: int) -> str:
     return (date.today() + timedelta(days=d)).isoformat()
 
 
+# Customer mailing line used on /quote and /intake tests (ZIP matches tax test defaults).
+QUOTE_CUSTOMER_ADDRESS = "400 Billing Blvd, Kansas City, MO 64111"
+
+
 def test_quote_returns_pricing(client, seed_item, seed_day_statuses):
     item = seed_item(cost_per_day=100.0, minimum_day_rental=1)
     start, end = _future(5), _future(7)
@@ -40,6 +44,7 @@ def test_quote_returns_pricing(client, seed_item, seed_day_statuses):
         "start_date": start,
         "end_date": end,
         "customer_email": "quote@test.com",
+        "customer_address": QUOTE_CUSTOMER_ADDRESS,
     })
     assert res.status_code == 200
     body = res.json()
@@ -85,6 +90,7 @@ def test_quote_with_delivery_adds_fee_and_tax_on_subtotal(
             "start_date": start,
             "end_date": end,
             "customer_email": "delquote@test.com",
+            "customer_address": QUOTE_CUSTOMER_ADDRESS,
             "delivery_requested": True,
             "delivery_address": "200 Main St, Kansas City, MO",
         },
@@ -115,11 +121,55 @@ def test_quote_delivery_unavailable_on_item_returns_400(client, seed_item, seed_
             "start_date": start,
             "end_date": end,
             "customer_email": "x@test.com",
+            "customer_address": QUOTE_CUSTOMER_ADDRESS,
             "delivery_requested": True,
             "delivery_address": "200 Main St",
         },
     )
     assert res.status_code == 400
+    assert "does not offer" in res.json().get("detail", "").lower()
+
+
+def test_quote_pickup_from_site_adds_fee(client, seed_item, seed_day_statuses, fake_settings, db_store, monkeypatch):
+    fake_settings.google_maps_api_key = "fake-key"
+    monkeypatch.setattr(
+        "app.services.delivery_pricing.fetch_road_distance_miles",
+        lambda *_a, **_k: Decimal("10.00"),
+    )
+    row = db_store["delivery_settings"][0]
+    row["enabled"] = True
+    row["origin_address"] = "100 Depot St, Kansas City, MO"
+    row["price_per_mile"] = 2.0
+    row["minimum_fee"] = 0.0
+    row["free_miles"] = 0.0
+    row["max_delivery_miles"] = 100.0
+
+    item = seed_item(cost_per_day=100.0, minimum_day_rental=1)
+    start, end = _future(5), _future(7)
+    seed_day_statuses(item["id"], [
+        (_future(5), "open_for_booking"),
+        (_future(6), "open_for_booking"),
+        (_future(7), "open_for_booking"),
+    ])
+
+    res = client.post(
+        "/booking-requests/quote",
+        json={
+            "item_id": item["id"],
+            "start_date": start,
+            "end_date": end,
+            "customer_email": "pickupquote@test.com",
+            "customer_address": QUOTE_CUSTOMER_ADDRESS,
+            "delivery_requested": False,
+            "pickup_from_site_requested": True,
+            "logistics_address": "200 Main St, Kansas City, MO",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert float(body["delivery_fee"]) == 0.0
+    assert float(body["pickup_fee"]) == 20.0
+    assert abs(float(body["sales_tax_amount"]) - 13.52) < 0.02
 
 
 def test_quote_inactive_item_returns_404(client, seed_item):
@@ -129,6 +179,7 @@ def test_quote_inactive_item_returns_404(client, seed_item):
         "start_date": _future(5),
         "end_date": _future(7),
         "customer_email": "test@test.com",
+        "customer_address": QUOTE_CUSTOMER_ADDRESS,
     })
     assert res.status_code == 404
 
@@ -164,6 +215,7 @@ def test_quote_uses_sales_tax_rate_url_when_configured(client, seed_item, seed_d
                 "start_date": start,
                 "end_date": end,
                 "customer_email": "urlquote@test.com",
+                "customer_address": QUOTE_CUSTOMER_ADDRESS,
             },
         )
     assert res.status_code == 200
@@ -210,6 +262,7 @@ def test_quote_falls_back_when_tax_url_non_json_but_fallback_set(
                 "start_date": start,
                 "end_date": end,
                 "customer_email": "fbquote@test.com",
+                "customer_address": QUOTE_CUSTOMER_ADDRESS,
             },
         )
     assert res.status_code == 200
@@ -223,8 +276,67 @@ def test_quote_nonexistent_item_returns_404(client):
         "start_date": _future(5),
         "end_date": _future(7),
         "customer_email": "test@test.com",
+        "customer_address": QUOTE_CUSTOMER_ADDRESS,
     })
     assert res.status_code == 404
+
+
+def test_quote_does_not_send_quote_email(client, seed_item, seed_day_statuses):
+    """Live /quote updates the UI only; pricing email is sent on intake submit."""
+    item = seed_item(cost_per_day=100.0, minimum_day_rental=1)
+    start, end = _future(5), _future(7)
+    seed_day_statuses(item["id"], [
+        (_future(5), "open_for_booking"),
+        (_future(6), "open_for_booking"),
+        (_future(7), "open_for_booking"),
+    ])
+    with patch("app.routers.booking_requests.send_quote_email") as qmail:
+        res = client.post(
+            "/booking-requests/quote",
+            json={
+                "item_id": item["id"],
+                "start_date": start,
+                "end_date": end,
+                "customer_email": "quote@test.com",
+                "customer_address": QUOTE_CUSTOMER_ADDRESS,
+            },
+        )
+    assert res.status_code == 200
+    assert res.json().get("email_sent") is False
+    qmail.assert_not_called()
+
+
+def test_intake_sends_quote_email(client, seed_item, seed_day_statuses):
+    item = seed_item(cost_per_day=50.0, minimum_day_rental=1, towable=False)
+    start, end = _future(8), _future(9)
+    seed_day_statuses(item["id"], [
+        (start, "open_for_booking"),
+        (end, "open_for_booking"),
+    ])
+    with (
+        patch("app.routers.booking_requests.send_quote_email", return_value=True) as qmail,
+        patch(
+            "app.routers.booking_requests.send_booking_intake_continue_email",
+            return_value=None,
+        ) as cont,
+    ):
+        res = client.post(
+            "/booking-requests/intake",
+            json={
+                "item_id": item["id"],
+                "start_date": start,
+                "end_date": end,
+                "customer_email": "intake@test.com",
+                "customer_phone": "5551234567",
+                "customer_first_name": "In",
+                "customer_last_name": "Take",
+                "customer_address": QUOTE_CUSTOMER_ADDRESS,
+            },
+        )
+    assert res.status_code == 201
+    assert res.json().get("booking_id")
+    cont.assert_called_once()
+    qmail.assert_called_once()
 
 
 def test_create_booking_success(client, seed_item, seed_day_statuses, db_store):

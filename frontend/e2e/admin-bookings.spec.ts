@@ -1,7 +1,7 @@
 import { test, expect, loginAsAdmin, futureDate, tinyJpeg, API_BASE, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
 
 test.describe('Admin bookings', () => {
-  test.beforeAll(({}, testInfo) => {
+  test.beforeAll((_worker, testInfo) => {
     testInfo.skip(!E2E_ADMIN_AUTH_ENABLED, 'Set E2E_AUTH0_ACCESS_TOKEN (and backend Auth0 + admin rules)')
   })
 

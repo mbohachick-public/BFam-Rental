@@ -332,7 +332,7 @@ def test_admin_approve_mark_and_confirm_booking(
         "sales_tax_amount": 3.8,
         "rental_total_with_tax": 93.8,
         "sales_tax_source": "TEST",
-        "drivers_license_path": None,
+        "drivers_license_path": f"{bid}/drivers_license.jpg",
         "license_plate_path": None,
         "decline_reason": None,
         "created_at": "2026-04-01T00:00:00",
@@ -367,8 +367,10 @@ def test_admin_approve_mark_and_confirm_booking(
             "payment_deposit_gate": True,
         },
     }
-    ps = client.post(f"/booking-actions/{token}/sign", json=sign_body)
+    with patch("app.services.quote_email.send_customer_booking_fully_complete_email") as complete_mail:
+        ps = client.post(f"/booking-actions/{token}/sign", json=sign_body)
     assert ps.status_code == 200
+    complete_mail.assert_not_called()
     assert ps.json()["next_status"] == "approved_pending_payment"
 
     assert (
@@ -385,17 +387,16 @@ def test_admin_approve_mark_and_confirm_booking(
         ).status_code
         == 200
     )
-    with patch("app.routers.admin.try_send_pickup_instructions_after_confirm") as pickup_mail:
-        cf = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
-    assert cf.status_code == 200
-    assert cf.json()["status"] == "confirmed"
-    pickup_mail.assert_called_once()
+    row_final = next(r for r in db_store["booking_requests"] if r["id"] == bid)
+    assert row_final["status"] == "confirmed"
     booked = [
         r
         for r in db_store["item_day_status"]
         if r["item_id"] == item["id"] and r["status"] == "booked"
     ]
     assert len(booked) >= 2
+    cf = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
+    assert cf.status_code == 400
     get_settings.cache_clear()
 
 

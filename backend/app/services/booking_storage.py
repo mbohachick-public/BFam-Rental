@@ -15,7 +15,8 @@ from app.config import Settings, get_settings
 from app.services.booking_documents import (
     BOOKING_DOCUMENTS_BUCKET,
     MAX_IMAGE_BYTES,
-    content_type_for_storage_path,
+    sniff_booking_document_content_type,
+    validate_customer_booking_document,
     validate_image_upload,
 )
 
@@ -86,8 +87,8 @@ def verify_booking_document_uploaded(client: Client, path: str, label: str) -> N
     data = bucket.download(path)
     if len(data) > MAX_IMAGE_BYTES:
         raise ValueError(f"{label} must be at most {MAX_IMAGE_BYTES // (1024 * 1024)} MB.")
-    ct = content_type_for_storage_path(path)
-    validate_image_upload(ct, len(data), label)
+    ct_sniffed = sniff_booking_document_content_type(path, data)
+    validate_customer_booking_document(ct_sniffed, len(data), label)
 
 
 def remove_booking_storage_prefix(settings: Settings, client: Client, booking_id: str) -> None:
@@ -162,6 +163,32 @@ def admin_document_view_urls(
     )
 
 
+def customer_document_view_urls(
+    settings: Settings, client: Client, row: dict
+) -> tuple[str | None, str | None, str | None]:
+    """
+    URLs for the signed-in customer (My rentals).
+
+    Supabase: time-limited signed URLs (fine to open in a new tab).
+    Local: API-relative paths — the SPA must fetch with the customer's Bearer token and open a blob URL.
+    """
+    rid = row["id"]
+    dl_p = row.get("drivers_license_path")
+    lp_p = row.get("license_plate_path")
+    ins_p = row.get("insurance_card_path")
+    if settings.booking_documents_storage == "local":
+        return (
+            f"/booking-requests/mine/{rid}/files/drivers-license" if dl_p else None,
+            f"/booking-requests/mine/{rid}/files/license-plate" if lp_p else None,
+            f"/booking-requests/mine/{rid}/files/insurance-card" if ins_p else None,
+        )
+    return (
+        _supabase_signed_url(client, dl_p) if dl_p else None,
+        _supabase_signed_url(client, lp_p) if lp_p else None,
+        _supabase_signed_url(client, ins_p) if ins_p else None,
+    )
+
+
 def try_delete_booking_document(settings: Settings, client: Client, relative_path: str | None) -> None:
     """Remove a booking upload from disk or Supabase Storage if present; ignores errors."""
     if not relative_path:
@@ -186,6 +213,32 @@ def _safe_local_file(settings: Settings, relative_path: str) -> Path:
     if not str(p).startswith(str(root)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file path")
     return p
+
+
+def _serve_booking_upload_path(
+    settings: Settings,
+    client: Client,
+    rel: str,
+) -> FileResponse | RedirectResponse:
+    """Stream or redirect for one booking-documents object path (license, plate, insurance)."""
+    if settings.booking_documents_storage == "local":
+        fs_path = _safe_local_file(settings, rel)
+        if not fs_path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
+        media, _ = mimetypes.guess_type(fs_path.name)
+        return FileResponse(
+            fs_path,
+            media_type=media or "application/octet-stream",
+            filename=fs_path.name,
+        )
+
+    url = _supabase_signed_url(client, rel)
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not sign storage URL. Check Supabase Storage bucket configuration.",
+        )
+    return RedirectResponse(url, status_code=307)
 
 
 def admin_booking_file_response(
@@ -217,21 +270,89 @@ def admin_booking_file_response(
     if not rel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    if settings.booking_documents_storage == "local":
-        fs_path = _safe_local_file(settings, rel)
-        if not fs_path.is_file():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
-        media, _ = mimetypes.guess_type(fs_path.name)
-        return FileResponse(
-            fs_path,
-            media_type=media or "application/octet-stream",
-            filename=fs_path.name,
-        )
+    return _serve_booking_upload_path(settings, client, rel)
 
-    url = _supabase_signed_url(client, rel)
-    if not url:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not sign storage URL. Check Supabase Storage bucket configuration.",
-        )
-    return RedirectResponse(url, status_code=307)
+
+def customer_booking_file_response(
+    client: Client,
+    request_id: str,
+    file_key: str,
+    *,
+    customer_auth0_sub: str,
+) -> FileResponse | RedirectResponse:
+    """Same as admin file response but only if ``customer_auth0_sub`` matches the booking owner."""
+    settings = get_settings()
+    if file_key == "drivers-license":
+        col = "drivers_license_path"
+    elif file_key == "license-plate":
+        col = "license_plate_path"
+    elif file_key == "insurance-card":
+        col = "insurance_card_path"
+    else:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown file")
+
+    res = (
+        client.table("booking_requests")
+        .select(f"{col},customer_auth0_sub")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    row = rows[0]
+    if str(row.get("customer_auth0_sub") or "") != str(customer_auth0_sub):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    rel = row.get(col)
+    if not rel:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return _serve_booking_upload_path(settings, client, rel)
+
+
+def customer_executed_contract_file_response(
+    client: Client,
+    request_id: str,
+    *,
+    customer_auth0_sub: str,
+) -> FileResponse:
+    """PDF produced at signing; path stored on ``booking_documents`` (local filesystem)."""
+    settings = get_settings()
+    res = (
+        client.table("booking_requests")
+        .select("customer_auth0_sub")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    if str(rows[0].get("customer_auth0_sub") or "") != str(customer_auth0_sub):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+
+    doc_res = (
+        client.table("booking_documents")
+        .select("pdf_path")
+        .eq("booking_id", request_id)
+        .eq("document_type", "EXECUTED_PACKET")
+        .limit(1)
+        .execute()
+    )
+    doc_rows = doc_res.data or []
+    if not doc_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+    raw_path = doc_rows[0].get("pdf_path")
+    if not raw_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+    p = Path(str(raw_path)).resolve()
+    root = Path(settings.contract_packets_dir).resolve()
+    if not str(p).startswith(str(root)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+    if not p.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract file missing")
+    return FileResponse(
+        p,
+        media_type="application/pdf",
+        filename=f"rental-agreement-{request_id}.pdf",
+    )

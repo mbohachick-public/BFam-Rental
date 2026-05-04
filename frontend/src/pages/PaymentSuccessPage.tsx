@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiGetPublic } from '../api/client'
 import { LEGAL_BUSINESS_NAME } from '../branding'
@@ -46,15 +46,21 @@ function customerFacingBookingStatus(status: string): string {
 export function PaymentSuccessPage() {
   const [params] = useSearchParams()
   const bookingId = params.get('booking_id')?.trim() ?? ''
+  const bookingIdOk = Boolean(bookingId)
   const [data, setData] = useState<BookingPaymentStatusPublic | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [signToken, setSignToken] = useState<string | null>(null)
+
+  const signToken = useMemo(() => {
+    if (!bookingIdOk) return null
+    try {
+      return sessionStorage.getItem(SIGN_TOKEN_KEY(bookingId))
+    } catch {
+      return null
+    }
+  }, [bookingId, bookingIdOk])
 
   useEffect(() => {
-    if (!bookingId) {
-      setError('Missing booking reference.')
-      return
-    }
+    if (!bookingIdOk) return
     let cancelled = false
     apiGetPublic<BookingPaymentStatusPublic>(
       `/booking-requests/${encodeURIComponent(bookingId)}/payment-status`,
@@ -68,16 +74,17 @@ export function PaymentSuccessPage() {
     return () => {
       cancelled = true
     }
-  }, [bookingId])
+  }, [bookingId, bookingIdOk])
 
-  useEffect(() => {
-    if (!bookingId) return
-    try {
-      setSignToken(sessionStorage.getItem(SIGN_TOKEN_KEY(bookingId)))
-    } catch {
-      setSignToken(null)
-    }
-  }, [bookingId])
+  if (!bookingIdOk) {
+    return (
+      <div className="container">
+        <h1>Payment</h1>
+        <p className="error-msg">Missing booking reference.</p>
+        <Link to="/catalog">Back to catalog</Link>
+      </div>
+    )
+  }
 
   if (error) {
     return (

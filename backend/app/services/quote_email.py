@@ -64,6 +64,45 @@ def smtp_account_mailbox(settings: Settings) -> str | None:
     return _parse_email_address(settings.smtp_from)
 
 
+def _log_smtp_send_failure(
+    settings: Settings,
+    *,
+    context: str,
+    to_addr: str,
+    exc: BaseException,
+) -> None:
+    """One structured line + optional traceback (``smtp_log_verbose``). No secrets logged."""
+    host = (settings.smtp_host or "").strip() or "?"
+    port = int(settings.smtp_port)
+    timeout_s = int(settings.smtp_timeout_seconds)
+    starttls = settings.smtp_use_tls
+    login_configured = bool((settings.smtp_user or "").strip())
+    errno_s = ""
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) is not None:
+        errno_s = f" errno={exc.errno}"
+    msg = (
+        "SMTP failure [%s] to=%s via=%s:%s timeout_s=%s starttls=%s login_configured=%s "
+        "smtp_debug=%s exc_type=%s: %s%s"
+    )
+    args = (
+        context,
+        to_addr,
+        host,
+        port,
+        timeout_s,
+        starttls,
+        login_configured,
+        settings.smtp_debug,
+        type(exc).__name__,
+        exc,
+        errno_s,
+    )
+    if settings.smtp_log_verbose:
+        log.warning(msg, *args, exc_info=True)
+    else:
+        log.warning(msg, *args)
+
+
 def _money(d: Decimal) -> str:
     return f"${d:,.2f}"
 
@@ -75,8 +114,21 @@ def _send_message(settings: Settings, to_addr: str, subject: str, plain: str, ht
     msg["To"] = to_addr
     msg.set_content(plain)
     msg.add_alternative(html, subtype="html")
+    host = settings.smtp_host.strip()
+    port = int(settings.smtp_port)
     timeout = int(settings.smtp_timeout_seconds)
-    with smtplib.SMTP(settings.smtp_host.strip(), int(settings.smtp_port), timeout=timeout) as smtp:
+    if settings.smtp_debug:
+        log.info(
+            "SMTP begin to=%s host=%s port=%s timeout_s=%s starttls=%s",
+            to_addr,
+            host,
+            port,
+            timeout,
+            settings.smtp_use_tls,
+        )
+    with smtplib.SMTP(host, port, timeout=timeout) as smtp:
+        if settings.smtp_debug:
+            smtp.set_debuglevel(1)
         if settings.smtp_use_tls:
             smtp.starttls()
         user = settings.smtp_user.strip()
@@ -97,13 +149,11 @@ def try_send_email(
     if not smtp_configured(settings):
         log.info("SMTP not configured; skip email to %s", to_addr)
         return False
-    host = settings.smtp_host.strip() or "?"
-    port = int(settings.smtp_port)
     try:
         _send_message(settings, to_addr.strip(), subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send email to %s via %s:%s: %s", to_addr, host, port, e)
+        _log_smtp_send_failure(settings, context="generic", to_addr=to_addr, exc=e)
         return False
 
 
@@ -269,7 +319,7 @@ def send_pickup_confirmed_email(
         _send_message(settings, to_addr.strip(), subj, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send pickup instructions email: %s", e)
+        _log_smtp_send_failure(settings, context="pickup_instructions", to_addr=to_addr, exc=e)
         return False
 
 
@@ -351,13 +401,11 @@ def send_quote_email(
 <p>This is the amount that will have to be paid before the trailer leaves the lot.</p>
 {_email_signature_html()}
 </body></html>"""
-    host = settings.smtp_host.strip() or "?"
-    port = int(settings.smtp_port)
     try:
         _send_message(settings, to_addr, subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send quote email to %s via %s:%s: %s", to_addr, host, port, e)
+        _log_smtp_send_failure(settings, context="quote_email", to_addr=to_addr, exc=e)
         return False
 
 
@@ -505,7 +553,7 @@ def send_booking_approved_email(
         _send_message(settings, to_addr, subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send approval email: %s", e)
+        _log_smtp_send_failure(settings, context="approval_email", to_addr=to_addr, exc=e)
         return False
 
 
@@ -696,7 +744,7 @@ def send_customer_booking_fully_complete_email(
         _send_message(settings, to_addr, subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send booking-complete email: %s", e)
+        _log_smtp_send_failure(settings, context="booking_complete", to_addr=to_addr, exc=e)
         return False
 
 
@@ -806,7 +854,7 @@ def send_stripe_checkout_ready_email(
         _send_message(settings, to_addr, subject, plain, html_body)
         return "sent"
     except Exception as e:
-        log.warning("Failed to send Stripe checkout email: %s", e)
+        _log_smtp_send_failure(settings, context="stripe_checkout", to_addr=to_addr, exc=e)
         msg = str(e).replace("\n", " ").strip() or type(e).__name__
         tail = msg[:180] if len(msg) > 180 else msg
         return f"failed_smtp:{tail}"
@@ -854,5 +902,5 @@ Requested period: {html.escape(start_date)} → {html.escape(end_date)}</p>
         _send_message(settings, to_addr, subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send decline email: %s", e)
+        _log_smtp_send_failure(settings, context="decline_email", to_addr=to_addr, exc=e)
         return False

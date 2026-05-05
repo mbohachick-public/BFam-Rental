@@ -1,3 +1,5 @@
+import logging
+
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,10 +7,22 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.routers import admin, booking_actions, booking_requests, items, stripe_webhook
+from app.services.quote_email import smtp_configured
+
+_log = logging.getLogger(__name__)
 
 app = FastAPI(title="BFam Rental API", version="0.1.0")
 
 settings = get_settings()
+if smtp_configured(settings):
+    _log.info(
+        "SMTP enabled host=%s port=%s timeout_s=%s starttls=%s debug=%s",
+        settings.smtp_host.strip(),
+        int(settings.smtp_port),
+        int(settings.smtp_timeout_seconds),
+        settings.smtp_use_tls,
+        settings.smtp_debug,
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from supabase import Client
 
 from app.config import get_settings
+from app.db import get_supabase
 from app.deps import customer_jwt_claims, get_supabase_client, require_customer_jwt
 from app.schemas import (
     BookingCompleteBody,
@@ -131,6 +132,32 @@ def _dispatch_booking_intake_emails(
         )
     except Exception:
         log.exception("Booking intake follow-up emails failed (to=%s)", to_addr)
+
+
+def _dispatch_booking_verification_emails(
+    *,
+    booking_id: str,
+    customer_email: str,
+    item_title: str,
+    start_date_str: str,
+    end_date_str: str,
+) -> None:
+    """After step-2 verification POST — admin + customer SMTP must not block the response."""
+    try:
+        settings = get_settings()
+        client = get_supabase()
+        try_notify_admin_approval_needed(client, settings, booking_id)
+        em = customer_email.strip()
+        if em:
+            send_booking_pending_review_notice_email(
+                settings,
+                to_addr=em,
+                item_title=item_title,
+                start_date=start_date_str,
+                end_date=end_date_str,
+            )
+    except Exception:
+        log.exception("Booking verification follow-up emails failed (booking_id=%s)", booking_id)
 
 
 def _upsert_booking_date_hold(client: Client, item_id: str, start_date: date, end_date: date) -> None:
@@ -818,6 +845,7 @@ def booking_stripe_setup_intent(
 def submit_booking_verification(
     booking_id: str,
     body: BookingVerificationSubmit,
+    background_tasks: BackgroundTasks,
     _customer: dict | None = Depends(customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingRequestOut:
@@ -922,19 +950,20 @@ def submit_booking_verification(
     final = (res2.data or [None])[0]
     if not final:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Update failed")
-    try_notify_admin_approval_needed(client, settings, booking_id)
     to_addr = (final.get("customer_email") or "").strip()
+    item_title = "Rental item"
     if to_addr:
         it = client.table("items").select("title").eq("id", final["item_id"]).limit(1).execute()
         titles = it.data or []
-        tit = str((titles or [{}])[0].get("title") or "Rental item") if titles else "Rental item"
-        send_booking_pending_review_notice_email(
-            settings,
-            to_addr=to_addr,
-            item_title=tit,
-            start_date=str(final["start_date"]),
-            end_date=str(final["end_date"]),
-        )
+        item_title = str((titles or [{}])[0].get("title") or "Rental item") if titles else "Rental item"
+    background_tasks.add_task(
+        _dispatch_booking_verification_emails,
+        booking_id=booking_id,
+        customer_email=to_addr,
+        item_title=item_title,
+        start_date_str=str(final["start_date"]),
+        end_date_str=str(final["end_date"]),
+    )
     return booking_out_from_row(client, final, sign_document_urls=False)
 
 

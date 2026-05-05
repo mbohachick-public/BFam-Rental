@@ -75,7 +75,8 @@ def _send_message(settings: Settings, to_addr: str, subject: str, plain: str, ht
     msg["To"] = to_addr
     msg.set_content(plain)
     msg.add_alternative(html, subtype="html")
-    with smtplib.SMTP(settings.smtp_host.strip(), int(settings.smtp_port), timeout=45) as smtp:
+    timeout = int(settings.smtp_timeout_seconds)
+    with smtplib.SMTP(settings.smtp_host.strip(), int(settings.smtp_port), timeout=timeout) as smtp:
         if settings.smtp_use_tls:
             smtp.starttls()
         user = settings.smtp_user.strip()
@@ -96,11 +97,13 @@ def try_send_email(
     if not smtp_configured(settings):
         log.info("SMTP not configured; skip email to %s", to_addr)
         return False
+    host = settings.smtp_host.strip() or "?"
+    port = int(settings.smtp_port)
     try:
         _send_message(settings, to_addr.strip(), subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send email to %s: %s", to_addr, e)
+        log.warning("Failed to send email to %s via %s:%s: %s", to_addr, host, port, e)
         return False
 
 
@@ -348,11 +351,13 @@ def send_quote_email(
 <p>This is the amount that will have to be paid before the trailer leaves the lot.</p>
 {_email_signature_html()}
 </body></html>"""
+    host = settings.smtp_host.strip() or "?"
+    port = int(settings.smtp_port)
     try:
         _send_message(settings, to_addr, subject, plain, html_body)
         return True
     except Exception as e:
-        log.warning("Failed to send quote email: %s", e)
+        log.warning("Failed to send quote email to %s via %s:%s: %s", to_addr, host, port, e)
         return False
 
 

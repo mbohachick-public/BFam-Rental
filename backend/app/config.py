@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_use_tls: bool = True
+    #: Per-operation socket timeout (connect + TLS + send). Raise in production if logs show ``timed out``.
+    smtp_timeout_seconds: int = Field(default=45, ge=5, le=600)
     # Optional staff inbox for workflow mail; if empty, SMTP_USER (if email-shaped) or SMTP_FROM is used.
     admin_notification_email: str = ""
     # Optional Auth0: when both are set, POST /booking-requests and /booking-requests/quote require a valid Bearer access token (audience = API identifier).

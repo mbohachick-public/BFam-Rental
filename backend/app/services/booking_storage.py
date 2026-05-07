@@ -6,6 +6,7 @@ import mimetypes
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from fastapi import HTTPException, status
 from fastapi.responses import FileResponse, RedirectResponse
 from storage3.types import CreateSignedUploadUrlOptions
@@ -84,7 +85,20 @@ def verify_booking_document_uploaded(client: Client, path: str, label: str) -> N
     bucket = client.storage.from_(BOOKING_DOCUMENTS_BUCKET)
     if not bucket.exists(path):
         raise ValueError(f"{label} file was not uploaded.")
-    data = bucket.download(path)
+    try:
+        data = bucket.download(path)
+    except (httpx.ReadTimeout, TimeoutError) as e:
+        # Storage verification is best-effort; transient timeouts should not be treated as user error.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Temporary error verifying {label} upload. Please try again in a moment.",
+        ) from e
+    except Exception as e:
+        # Keep a user-friendly message; treat unknown storage failures as transient.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Temporary error verifying {label} upload. Please try again in a moment.",
+        ) from e
     if len(data) > MAX_IMAGE_BYTES:
         raise ValueError(f"{label} must be at most {MAX_IMAGE_BYTES // (1024 * 1024)} MB.")
     ct_sniffed = sniff_booking_document_content_type(path, data)

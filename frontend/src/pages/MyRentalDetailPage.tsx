@@ -22,6 +22,30 @@ async function openBookingAsset(url: string | null | undefined, label: string) {
   }
 }
 
+async function downloadBookingAsset(
+  url: string | null | undefined,
+  *,
+  filename: string,
+  label: string,
+) {
+  if (!url) return
+  try {
+    const path = url.startsWith('/') ? url : `/${url}`
+    const blob = await bookingDownloadBlob(path)
+    const obj = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = obj
+    a.download = filename
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(obj), 30_000)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : `Could not download ${label}`)
+  }
+}
+
 function money(s: string | null | undefined) {
   if (s == null || s === '') return '—'
   const n = Number(s)
@@ -236,7 +260,7 @@ export function MyRentalDetailPage() {
           <section className="card card-pad section-block">
             <h2>Signed agreement</h2>
             {row.has_executed_contract ? (
-              <p>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="btn btn-primary"
@@ -249,7 +273,22 @@ export function MyRentalDetailPage() {
                 >
                   Open signed rental packet (PDF)
                 </button>
-              </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() =>
+                    downloadBookingAsset(
+                      `/booking-requests/mine/${encodeURIComponent(row.id)}/executed-contract`,
+                      {
+                        filename: `rental-agreement-${row.id}.pdf`,
+                        label: 'Signed rental packet',
+                      },
+                    )
+                  }
+                >
+                  Download PDF
+                </button>
+              </div>
             ) : (
               <p className="muted">No executed agreement is on file yet for this request.</p>
             )}

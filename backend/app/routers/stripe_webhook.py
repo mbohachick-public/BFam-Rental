@@ -49,6 +49,23 @@ def _insert_processed_event(
     ).execute()
 
 
+def _booking_exists(client: Client, booking_id: str) -> bool:
+    try:
+        rows = (
+            client.table("booking_requests")
+            .select("id")
+            .eq("id", booking_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return bool(rows)
+    except Exception:
+        # If Supabase is transiently unavailable, don't block webhook idempotency logging.
+        return False
+
+
 def _checkout_session_paid(session: dict) -> bool:
     ps = str(session.get("payment_status") or "").strip().lower()
     return ps in ("paid", "no_payment_required")
@@ -409,6 +426,16 @@ async def stripe_webhook(request: Request, client: Client = Depends(get_supabase
     booking_id_for_log: str | None = None
     if isinstance(data_obj.get("metadata"), dict):
         booking_id_for_log = (data_obj["metadata"].get("booking_id") or "").strip() or None
+    if booking_id_for_log and not _booking_exists(client, booking_id_for_log):
+        # Don't 500 on FK violations when Stripe event metadata contains an unknown booking_id
+        # (e.g. local dev, stale links, or non-booking Stripe events).
+        logger.warning(
+            "stripe_webhook_unknown_booking_id event_id=%s type=%s booking_id=%s",
+            event_id,
+            event_type,
+            booking_id_for_log,
+        )
+        booking_id_for_log = None
 
     if _event_already_processed(client, event_id):
         return {"received": True, "duplicate": True}
@@ -426,6 +453,9 @@ async def stripe_webhook(request: Request, client: Client = Depends(get_supabase
             _handle_checkout_failed(client, data_obj, payment_status="async_failed")
         elif event_type == "payment_intent.payment_failed":
             logger.info("stripe_webhook_payment_intent_failed ignored_phase1")
+        elif event_type.startswith("setup_intent."):
+            # SetupIntents are used for card-on-file capture; they don't affect booking payment state.
+            logger.info("stripe_webhook_setup_intent_ignored type=%s", event_type)
         else:
             logger.debug("stripe_webhook_unhandled_type type=%s", event_type)
         _insert_processed_event(

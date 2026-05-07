@@ -24,11 +24,13 @@ async function openBookingAsset(url: string | null | undefined, label: string) {
 
 async function downloadBookingAsset(
   url: string | null | undefined,
-  *,
-  filename: string,
-  label: string,
+  opts: {
+    filename: string
+    label: string
+  },
 ) {
   if (!url) return
+  const { filename, label } = opts
   try {
     const path = url.startsWith('/') ? url : `/${url}`
     const blob = await bookingDownloadBlob(path)

@@ -24,9 +24,16 @@ router = APIRouter(prefix="/booking-actions", tags=["booking-actions"])
 
 
 def _client_ip(request: Request) -> str | None:
+    # Prefer real client IP when behind proxies (Render / Cloudflare).
     xf = request.headers.get("x-forwarded-for")
     if xf:
         return xf.split(",")[0].strip() or None
+    xr = request.headers.get("x-real-ip")
+    if xr:
+        return xr.strip() or None
+    cf = request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip() or None
     if request.client:
         return request.client.host
     return None

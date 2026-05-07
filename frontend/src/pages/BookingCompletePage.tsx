@@ -85,6 +85,7 @@ export function BookingCompletePage() {
   const [jobSiteAddress, setJobSiteAddress] = useState('')
   const [sameAsCustomerJobSite, setSameAsCustomerJobSite] = useState(false)
   const [towAck, setTowAck] = useState(false)
+  const [insuranceTowAck, setInsuranceTowAck] = useState(false)
   const [approvalAck, setApprovalAck] = useState(false)
   const [signIntentAck, setSignIntentAck] = useState(false)
   const [dlFile, setDlFile] = useState<File | null>(null)
@@ -201,6 +202,10 @@ export function BookingCompletePage() {
       setSubmitErr('Confirm that your vehicle can safely tow this trailer.')
       return
     }
+    if (!insuranceTowAck) {
+      setSubmitErr('Please confirm you carry valid auto insurance that covers towing this trailer.')
+      return
+    }
     if (!approvalAck) {
       setSubmitErr(
         'Please confirm that this request is subject to approval and is not yet confirmed.',
@@ -248,6 +253,7 @@ export function BookingCompletePage() {
             ? jobSiteAddress.trim()
             : undefined,
         vehicle_tow_capable_ack: summary.towable ? towAck : false,
+        auto_insurance_towing_ack: insuranceTowAck,
         request_approval_acknowledged: approvalAck,
         agreement_sign_intent_acknowledged: signIntentAck,
         damage_waiver_selected: false,
@@ -567,12 +573,22 @@ export function BookingCompletePage() {
       ) : null}
 
       <section className="card card-pad section-block">
-        <h2>Insurance Information (Optional)</h2>
-        <p className="muted small">
-          Upload your insurance card if you&apos;d like us to keep it on file.
-        </p>
-        <label className="field field-span">
-          <span className="field-label">Insurance card</span>
+        <h2>Insurance</h2>
+        <label className="field field-checkbox field-span">
+          <input
+            type="checkbox"
+            checked={insuranceTowAck}
+            onChange={(e) => setInsuranceTowAck(e.target.checked)}
+            disabled={formDisabled}
+          />
+          <span>
+            I confirm I carry valid auto insurance and understand I am financially responsible for any
+            damage or loss regardless of insurance coverage.
+          </span>
+        </label>
+
+        <label className="field field-span tight-top">
+          <span className="field-label">(Optional) Upload insurance card</span>
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp,application/pdf"
@@ -581,6 +597,9 @@ export function BookingCompletePage() {
           />
           {insFile ? <span className="muted small">{insFile.name}</span> : null}
         </label>
+        <p className="muted small field-span">
+          Upload your insurance card if you&apos;d like us to keep it on file or speed up approval.
+        </p>
       </section>
 
       <section className="card card-pad section-block">

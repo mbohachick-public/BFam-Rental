@@ -138,6 +138,8 @@ class Settings(BaseSettings):
     google_maps_http_timeout_sec: float = 12.0
     #: Optional add-on shown on Step 2 damage waiver (USD per rental day). Set to 0 to hide in UI.
     damage_waiver_per_day_usd: str = "15.00"
+    #: Future toggle: require an insurance card upload before admin approval (not during Step 2 submission).
+    requires_insurance_upload: bool = False
 
     @field_validator("supabase_url")
     @classmethod

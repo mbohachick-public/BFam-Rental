@@ -39,8 +39,10 @@ def _strip_html_to_lines(html: str, max_line_chars: int = 95) -> list[str]:
 def build_executed_packet_pdf(
     *,
     booking_summary: dict[str, Any],
-    agreement_html: str,
+    rental_agreement_lines: list[str],
     damage_html: str,
+    acknowledgments: list[str],
+    next_steps: list[str],
     signature_block: dict[str, Any],
 ) -> bytes:
     buf = BytesIO()
@@ -57,16 +59,64 @@ def build_executed_packet_pdf(
     story.append(Paragraph("<b>Executed rental packet</b>", styles["Title"]))
     story.append(Spacer(1, 12))
     story.append(Paragraph("<b>Booking summary</b>", styles["Heading2"]))
-    for k, v in booking_summary.items():
-        story.append(Paragraph(f"<b>{k}:</b> {v}", styles["Normal"]))
+    for k in [
+        "Equipment",
+        "Rental period",
+        "Fulfillment",
+        "Pricing snapshot",
+        "Status",
+    ]:
+        v = booking_summary.get(k)
+        if v is None:
+            continue
+        story.append(Paragraph(f"<b>{xml_escape(str(k))}:</b> {xml_escape(str(v))}", styles["Normal"]))
     story.append(Spacer(1, 14))
-    story.append(Paragraph("<b>Rental agreement (text extract)</b>", styles["Heading2"]))
-    for line in _strip_html_to_lines(agreement_html)[:400]:
+
+    story.append(Paragraph("<b>Equipment</b>", styles["Heading2"]))
+    if booking_summary.get("Equipment") is not None:
+        story.append(Paragraph(xml_escape(str(booking_summary.get("Equipment"))), styles["Normal"]))
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<b>Rental period</b>", styles["Heading2"]))
+    if booking_summary.get("Rental period") is not None:
+        story.append(Paragraph(xml_escape(str(booking_summary.get("Rental period"))), styles["Normal"]))
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<b>Fulfillment</b>", styles["Heading2"]))
+    if booking_summary.get("Fulfillment") is not None:
+        story.append(Paragraph(xml_escape(str(booking_summary.get("Fulfillment"))), styles["Normal"]))
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<b>Pricing snapshot</b>", styles["Heading2"]))
+    if booking_summary.get("Pricing snapshot") is not None:
+        story.append(Paragraph(xml_escape(str(booking_summary.get("Pricing snapshot"))), styles["Normal"]))
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("<b>Rental Agreement</b>", styles["Heading2"]))
+    for line in rental_agreement_lines:
+        if not str(line).strip():
+            story.append(Spacer(1, 8))
+            continue
+        story.append(Paragraph(xml_escape(str(line)), styles["Normal"]))
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("<b>Damage &amp; fee schedule</b>", styles["Heading2"]))
+    for line in _strip_html_to_lines(damage_html)[:250]:
         story.append(Paragraph(xml_escape(line), styles["Normal"]))
     story.append(Spacer(1, 14))
-    story.append(Paragraph("<b>Damage &amp; fee schedule (text extract)</b>", styles["Heading2"]))
-    for line in _strip_html_to_lines(damage_html)[:400]:
-        story.append(Paragraph(xml_escape(line), styles["Normal"]))
+    story.append(
+        Paragraph(
+            xml_escape(
+                "Final charges may exceed the security deposit. Renter agrees to pay any remaining balance."
+            ),
+            styles["Normal"],
+        )
+    )
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("<b>Acknowledgments</b>", styles["Heading2"]))
+    for a in acknowledgments:
+        story.append(Paragraph(xml_escape(f"• {a}"), styles["Normal"]))
     story.append(Spacer(1, 14))
     story.append(Paragraph("<b>Electronic signature</b>", styles["Heading2"]))
     for line in [
@@ -78,6 +128,20 @@ def build_executed_packet_pdf(
         f"IP: {signature_block.get('ip_address') or '—'}",
     ]:
         story.append(Paragraph(xml_escape(line), styles["Normal"]))
+    story.append(Spacer(1, 10))
+    story.append(
+        Paragraph(
+            xml_escape(
+                "By typing my name above, I agree that my electronic signature is binding and has the same legal effect as a handwritten signature."
+            ),
+            styles["Normal"],
+        )
+    )
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("<b>Next steps</b>", styles["Heading2"]))
+    for s in next_steps:
+        story.append(Paragraph(xml_escape(f"• {s}"), styles["Normal"]))
     doc.build(story)
     return buf.getvalue()
 

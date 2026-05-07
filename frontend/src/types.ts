@@ -296,6 +296,7 @@ export interface BookingPaymentStatusPublic {
   rental_paid: boolean
   rental_payment_status?: string | null
   item_title: string
+  customer_email?: string | null
   deposit_secured?: boolean
   requires_deposit?: boolean
 }

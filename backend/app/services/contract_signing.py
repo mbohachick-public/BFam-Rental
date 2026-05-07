@@ -10,6 +10,7 @@ from typing import Any
 
 from supabase import Client
 
+from app.branding import LEGAL_BUSINESS_NAME
 from app.config import Settings
 from app.schemas import BookingRequestStatus, PaymentPath
 from app.services.admin_notify import try_finalize_booking_after_obligations_complete, try_notify_admin_confirm_needed
@@ -251,7 +252,11 @@ def complete_customer_signature(
                 "agreement_version": DOCUMENT_VERSION,
                 "damage_schedule_version": DOCUMENT_VERSION,
                 "acknowledged_terms": acknowledgments,
-                "signature_audit_json": {"submitted_at": now},
+                "signature_audit_json": {
+                    "submitted_at": now,
+                    "signatureIpAddress": ip_address,
+                    "user_agent": user_agent,
+                },
             }
         )
         .execute()
@@ -263,17 +268,112 @@ def complete_customer_signature(
     root = Path(settings.contract_packets_dir)
     out_path = root / booking_id / f"{sig_id}.pdf"
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    delivery_requested = bool(booking.get("delivery_requested"))
+    pickup_from_site_requested = bool(booking.get("pickup_from_site_requested"))
+    job_site = str(booking.get("delivery_address") or "").strip()
+    fulfill_parts: list[str] = []
+    if not delivery_requested and not pickup_from_site_requested:
+        fulfill_parts.append("Customer pickup and return")
+    if delivery_requested:
+        fulfill_parts.append("Delivery to job site")
+    if pickup_from_site_requested:
+        fulfill_parts.append("Pickup from job site")
+    fulfillment = "; ".join(fulfill_parts) if fulfill_parts else "—"
+    if job_site and (delivery_requested or pickup_from_site_requested):
+        fulfillment = f"{fulfillment}; job site address: {job_site}"
+
+    rental_total = str(booking.get("rental_total_with_tax") or "")
+    deposit_amt = str(booking.get("deposit_amount") or "")
+    pricing = (
+        f"Rental total (includes tax where applicable): {rental_total or '—'}; "
+        f"Security deposit (refundable hold): {deposit_amt or '—'}; "
+        "Delivery and pickup charges are estimates and may be adjusted by Bohachick Rentals & Supply LLC prior to final approval."
+    )
+
     summary = {
-        "Trailer": payload["item_title"],
-        "Start": str(booking.get("start_date")),
-        "End": str(booking.get("end_date")),
-        "Rental total": str(booking.get("rental_total_with_tax") or ""),
-        "Deposit": str(booking.get("deposit_amount") or ""),
+        "Equipment": payload["item_title"],
+        "Rental period": f"{booking.get('start_date')} through {booking.get('end_date')}",
+        "Fulfillment": fulfillment,
+        "Pricing snapshot": pricing,
+        "Status": "Executed",
     }
+    # Executed packet should reflect final required checkboxes (no duplicates).
+    acks = [
+        "I have reviewed and agree to the Rental Agreement, including pricing, deposit terms, and responsibilities for damage and loss.",
+        "I have reviewed and acknowledge the Damage & Fee Schedule Addendum.",
+        "I understand I am financially responsible for any damage, loss, misuse, or loss of use of the equipment during the rental period, including amounts exceeding the security deposit.",
+        "I understand the equipment will not be released until payment and deposit requirements are satisfied and the booking is confirmed.",
+    ]
+    next_steps = [
+        "Check your email for pickup or delivery instructions before heading out.",
+        "Equipment is not released until payment, deposit, and confirmation requirements are complete.",
+        "Contact Bohachick Rentals & Supply LLC if anything looks incorrect.",
+    ]
+
+    renter_name = signer_name.strip()
+    owner = str(LEGAL_BUSINESS_NAME)
+    start = str(booking.get("start_date") or "")
+    end = str(booking.get("end_date") or "")
+    eq = str(payload.get("item_title") or "")
+    job_site_line = ""
+    if job_site and (delivery_requested or pickup_from_site_requested):
+        job_site_line = f"Job site address: {job_site}"
+
+    rental_agreement_lines = [
+        f"Version: {DOCUMENT_VERSION}",
+        "",
+        "Parties",
+        f"Owner: {owner}",
+        f"Renter: {renter_name}",
+        "",
+        "Equipment",
+        f"Equipment item: {eq}",
+        "",
+        "Rental Period",
+        f"{start} through {end}",
+        "",
+        "Fulfillment",
+        fulfillment.split("; job site address:")[0].strip(),
+        job_site_line,
+        "",
+        "Pricing Snapshot",
+        f"Rental total: {rental_total or '—'} (includes tax where applicable)",
+        f"Security deposit: {deposit_amt or '—'} (refundable hold)",
+        "Delivery and pickup charges are estimates and may be adjusted by Bohachick Rentals & Supply LLC prior to final approval.",
+        "",
+        "Terms Summary",
+        "Renter agrees to operate the equipment lawfully, return it on time and in the same condition subject to ordinary wear, and pay for damage, misuse, late fees, cleaning, missing items, and loss of use as described in this agreement and the Damage & Fee Schedule Addendum.",
+        "Renter is responsible for loss of use of the equipment during repair periods caused by damage, misuse, late return, or failure to return the equipment in acceptable condition.",
+        "Renter acknowledges the equipment is accepted in good working condition unless otherwise noted at pickup or delivery.",
+        "",
+        "Insurance",
+        "Renter represents and agrees that they carry valid automobile insurance that covers the towing and operation of the rented equipment.",
+        "Bohachick Rentals & Supply LLC does not provide insurance coverage for the rented equipment.",
+        "Renter is solely responsible for any damage, loss, or liability arising from the use of the equipment, regardless of insurance coverage.",
+        "Proof of insurance may be requested prior to release of the equipment or at any time during the rental period.",
+        "",
+        "Prohibited Uses",
+        "Renter agrees NOT to use the equipment for any of the following:",
+        "• Overloading the trailer beyond its rated capacity or unevenly loading cargo",
+        "• Transporting hazardous, illegal, or prohibited materials",
+        "• Hauling materials that can permanently damage the trailer (including but not limited to concrete, asphalt, corrosive chemicals, or hot materials) without prior approval",
+        "• Using the trailer in a reckless, unsafe, or unlawful manner",
+        "• Operating the trailer while under the influence of alcohol or drugs",
+        "• Allowing any unlicensed or unqualified person to tow or operate the trailer",
+        "• Using the trailer for commercial purposes not disclosed at the time of booking",
+        "• Subleasing, lending, or transferring the trailer to any third party",
+        "• Modifying, altering, or tampering with the trailer or its components",
+        "• Operating the trailer outside the intended use (including off-road misuse, stunt use, or racing)",
+        "• Failing to properly secure loads, resulting in damage or safety risk",
+        "• Continuing to use the trailer after noticing mechanical issues or damage",
+        "Violation of any prohibited use may result in additional charges, forfeiture of the security deposit, and renter responsibility for all resulting damage, repair, and loss of use.",
+    ]
     pdf_bytes = build_executed_packet_pdf(
         booking_summary=summary,
-        agreement_html=payload["agreement_html"],
+        rental_agreement_lines=rental_agreement_lines,
         damage_html=payload["damage_html"],
+        acknowledgments=acks,
+        next_steps=next_steps,
         signature_block={
             "signer_name": signer_name.strip(),
             "signer_email": email_for_record,

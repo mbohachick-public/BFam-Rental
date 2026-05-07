@@ -23,7 +23,7 @@ export function BookingSignPage() {
   const [typedSignature, setTypedSignature] = useState('')
   const [ackRental, setAckRental] = useState(false)
   const [ackDamage, setAckDamage] = useState(false)
-  const [ackResp, setAckResp] = useState(false)
+  const [ackFinancial, setAckFinancial] = useState(false)
   const [ackPay, setAckPay] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -61,13 +61,14 @@ export function BookingSignPage() {
     }
   }, [data])
 
-  const allAcknowledged = ackRental && ackDamage && ackResp && ackPay
+  const typedSignatureOk = Boolean(typedSignature.trim())
+  const allAcknowledged = ackRental && ackDamage && ackFinancial && ackPay
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!token) return
     if (!allAcknowledged) {
-      setError('Check all four acknowledgment boxes above, then try again.')
+      setError('Check all acknowledgment boxes above, then try again.')
       return
     }
     setSubmitting(true)
@@ -79,7 +80,7 @@ export function BookingSignPage() {
         acknowledgments: {
           rental_agreement: ackRental,
           damage_fee_schedule: ackDamage,
-          responsibility_fees: ackResp,
+          financial_responsibility: ackFinancial,
           payment_deposit_gate: ackPay,
         },
       }
@@ -191,30 +192,62 @@ export function BookingSignPage() {
 
       <section className="card card-pad section-block contract-html-block">
         <h2>Rental agreement</h2>
+        <p className="muted small">
+          You agree not to overload, misuse, or use the trailer in unsafe or prohibited ways. See full
+          agreement for details.
+        </p>
         <div className="contract-html" dangerouslySetInnerHTML={{ __html: data.agreement_html }} />
       </section>
 
       <section className="card card-pad section-block contract-html-block">
         <h2>Damage &amp; fee schedule</h2>
-        <div className="contract-html" dangerouslySetInnerHTML={{ __html: data.damage_html }} />
+        <p className="muted small">
+          Common examples (typical ranges; final charges depend on actual repair/replacement cost):
+        </p>
+        <ul className="muted small" style={{ marginTop: 0 }}>
+          <li>Tire replacement ($150–$400)</li>
+          <li>Coupler repair/replacement ($125–$450)</li>
+          <li>Cleanup / excessive debris ($50–$300)</li>
+          <li>Electrical repair ($50–$250)</li>
+          <li>Late return (additional daily rental rate until returned)</li>
+          <li>Administrative fee ($50–$100 per incident)</li>
+        </ul>
+        <details style={{ marginTop: '0.75rem' }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+            View full damage &amp; fee schedule (important)
+          </summary>
+          <div style={{ maxHeight: 520, overflow: 'auto', marginTop: '0.75rem' }}>
+            <div className="contract-html" dangerouslySetInnerHTML={{ __html: data.damage_html }} />
+          </div>
+        </details>
       </section>
 
       <section className="card card-pad section-block">
         <h2>Acknowledgments &amp; signature</h2>
+        <p className="muted small" style={{ marginTop: '-0.25rem' }}>
+          You&apos;re almost done. Review the agreement and check the boxes below to continue.
+        </p>
         <form className="booking-grid" onSubmit={onSubmit}>
           <label className="field field-checkbox field-span">
             <input type="checkbox" checked={ackRental} onChange={(e) => setAckRental(e.target.checked)} />
-            <span>I have reviewed and agree to the Rental Agreement.</span>
+            <span>
+              I have reviewed and agree to the Rental Agreement, including pricing, deposit terms, and
+              responsibilities for damage and loss.
+            </span>
           </label>
           <label className="field field-checkbox field-span">
             <input type="checkbox" checked={ackDamage} onChange={(e) => setAckDamage(e.target.checked)} />
             <span>I have reviewed and acknowledge the Damage &amp; Fee Schedule Addendum.</span>
           </label>
           <label className="field field-checkbox field-span">
-            <input type="checkbox" checked={ackResp} onChange={(e) => setAckResp(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={ackFinancial}
+              onChange={(e) => setAckFinancial(e.target.checked)}
+            />
             <span>
-              I understand that I am responsible for damage, misuse, late fees, cleaning fees, and
-              missing items during the rental period.
+              I understand I am financially responsible for any damage, loss, or misuse of the
+              equipment during the rental period, including amounts exceeding the security deposit.
             </span>
           </label>
           <label className="field field-checkbox field-span">
@@ -236,9 +269,12 @@ export function BookingSignPage() {
             <span className="field-label">Type your full name as your electronic signature</span>
             <input value={typedSignature} onChange={(e) => setTypedSignature(e.target.value)} required />
           </label>
+          <p className="muted small field-span" style={{ marginTop: '-0.25rem' }}>
+            By signing electronically, I agree this constitutes a legally binding signature.
+          </p>
           {!allAcknowledged ? (
             <p className="muted small field-span">
-              Check all four boxes above to enable <strong>Sign agreement</strong> (required by the
+              Check all boxes above to enable <strong>Sign agreement</strong> (required by the
               rental contract).
             </p>
           ) : null}
@@ -247,7 +283,7 @@ export function BookingSignPage() {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={submitting || !allAcknowledged || !emailOnFile}
+              disabled={submitting || !allAcknowledged || !typedSignatureOk || !emailOnFile}
             >
               {submitting ? 'Submitting…' : 'Sign agreement'}
             </button>

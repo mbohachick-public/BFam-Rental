@@ -206,10 +206,20 @@ class BookingVerificationSubmit(BaseModel):
         validation_alias=AliasChoices("job_site_address", "logistics_address"),
     )
     vehicle_tow_capable_ack: bool = False
+    auto_insurance_towing_ack: bool = False
     request_approval_acknowledged: bool = False
     agreement_sign_intent_acknowledged: bool = False
     damage_waiver_selected: bool = False
     stripe_payment_method_id: str | None = Field(default=None, max_length=120)
+
+    @field_validator("auto_insurance_towing_ack")
+    @classmethod
+    def _must_ack_insurance(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError(
+                "You must confirm you carry valid auto insurance and understand you are financially responsible for any damage or loss regardless of insurance coverage."
+            )
+        return v
 
     @field_validator("request_approval_acknowledged")
     @classmethod
@@ -490,6 +500,7 @@ class BookingPaymentStatusPublic(BaseModel):
     rental_paid: bool
     rental_payment_status: str | None = None
     item_title: str
+    customer_email: str | None = None
     deposit_secured: bool = False
     requires_deposit: bool = False
 
@@ -503,7 +514,7 @@ class BookingApproveBody(BaseModel):
 class BookingSignAcknowledgments(BaseModel):
     rental_agreement: bool = False
     damage_fee_schedule: bool = False
-    responsibility_fees: bool = False
+    financial_responsibility: bool = False
     payment_deposit_gate: bool = False
 
 
@@ -523,7 +534,7 @@ class BookingSignSubmit(BaseModel):
         if not (
             a.rental_agreement
             and a.damage_fee_schedule
-            and a.responsibility_fees
+            and a.financial_responsibility
             and a.payment_deposit_gate
         ):
             raise ValueError("All acknowledgment checkboxes must be accepted.")

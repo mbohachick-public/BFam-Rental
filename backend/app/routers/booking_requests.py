@@ -1164,7 +1164,9 @@ def public_booking_payment_status(booking_id: str, client: Client = Depends(get_
     """Post-Stripe thank-you page: minimal booking state (no auth; UUID is the secret)."""
     res = (
         client.table("booking_requests")
-        .select("id,status,rental_paid_at,rental_payment_status,item_id,deposit_secured_at,deposit_amount")
+        .select(
+            "id,status,rental_paid_at,rental_payment_status,item_id,deposit_secured_at,deposit_amount,customer_email"
+        )
         .eq("id", booking_id)
         .limit(1)
         .execute()
@@ -1197,6 +1199,7 @@ def public_booking_payment_status(booking_id: str, client: Client = Depends(get_
         rental_paid=paid,
         rental_payment_status=str(rps).strip() if rps is not None else None,
         item_title=item_title,
+        customer_email=str(row.get("customer_email") or "").strip() or None,
         deposit_secured=dep_secured,
         requires_deposit=requires_deposit,
     )

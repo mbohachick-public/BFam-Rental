@@ -129,6 +129,7 @@ def _enforce_owner_approve_gates(client: Client, settings, row: dict) -> None:
     """Block approve until required customer funnel data exists."""
     st = str(row.get("status") or "")
     has_dl = bool(row.get("drivers_license_path"))
+    has_ins = bool((row.get("insurance_card_path") or "").strip())
 
     if st == BookingRequestStatus.requested.value and not has_dl:
         raise HTTPException(
@@ -149,6 +150,8 @@ def _enforce_owner_approve_gates(client: Client, settings, row: dict) -> None:
     tw = bool((item_res.data or [{}])[0].get("towable"))
     if not has_dl:
         raise HTTPException(status_code=400, detail="Driver license must be uploaded before approval.")
+    if settings.requires_insurance_upload and not has_ins:
+        raise HTTPException(status_code=400, detail="Insurance card upload is required before approval.")
     if not (row.get("customer_address") or "").strip():
         raise HTTPException(status_code=400, detail="Customer address is missing.")
     if tw and not row.get("vehicle_tow_capable_ack"):

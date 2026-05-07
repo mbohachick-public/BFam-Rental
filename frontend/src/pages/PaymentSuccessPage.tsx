@@ -110,14 +110,43 @@ export function PaymentSuccessPage() {
     signToken && !fullyDone
       ? `/booking-actions/${encodeURIComponent(signToken)}/complete`
       : null
+  const requiresDeposit = Boolean(data.requires_deposit)
+  const depositStatus = requiresDeposit
+    ? data.deposit_secured
+      ? 'Hold secured'
+      : 'Not yet recorded'
+    : 'Not required'
 
   return (
     <div className="container page-payment-success">
-      <h1>Thank you</h1>
-      <p className="muted">
-        Stripe sent you back here after checkout. Payment status below may take a moment to update
-        while webhooks process.
+      <h1>You're confirmed</h1>
+      <p>Your rental is confirmed and your payment/deposit status is complete.</p>
+
+      <section className="card card-pad section-block" style={{ marginTop: '1rem' }}>
+        <p style={{ margin: 0, fontWeight: 700 }}>
+          We’ve sent your pickup or delivery instructions to:{' '}
+          <span style={{ fontWeight: 800 }}>
+            {data.customer_email?.trim() ? data.customer_email.trim() : 'your email address'}
+          </span>
+        </p>
+      </section>
+
+      <section className="card card-pad section-block" style={{ marginTop: '1rem' }}>
+        <h2 className="h3" style={{ marginTop: 0 }}>
+          Please check your email before heading out. It includes:
+        </h2>
+        <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
+          <li>Pickup time and location, or delivery details</li>
+          <li>What to bring</li>
+          <li>Trailer return instructions</li>
+          <li>Contact info if anything looks wrong</li>
+        </ul>
+      </section>
+
+      <p className="muted small" style={{ marginTop: '0.75rem' }}>
+        Payment status may take a moment to update while Stripe webhooks finish processing.
       </p>
+
       <section className="card card-pad section-block">
         <h2>Booking</h2>
         <dl className="attr-list">
@@ -133,12 +162,14 @@ export function PaymentSuccessPage() {
             <dt>Rental payment</dt>
             <dd>{data.rental_paid ? 'Received' : 'Not yet recorded'}</dd>
           </div>
-          {data.requires_deposit ? (
-            <div>
-              <dt>Security deposit</dt>
-              <dd>{data.deposit_secured ? 'Hold secured' : 'Not yet recorded'}</dd>
-            </div>
-          ) : null}
+          <div>
+            <dt>Security deposit</dt>
+            <dd>{depositStatus}</dd>
+          </div>
+          <div>
+            <dt>Next step</dt>
+            <dd>Check your email for pickup/delivery instructions</dd>
+          </div>
         </dl>
       </section>
       {continuePaymentHref ? (
@@ -156,11 +187,15 @@ export function PaymentSuccessPage() {
         </section>
       ) : null}
       <p className="muted small">
-        If something still looks wrong after a few minutes, contact {LEGAL_BUSINESS_NAME} with your
-        booking reference.
+        Didn’t receive the email? Check your spam folder or contact {LEGAL_BUSINESS_NAME}.
       </p>
-      <p>
-        <Link to="/catalog">Back to catalog</Link>
+      <p style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <Link to="/my-rentals" className="btn btn-primary">
+          Open My Rentals
+        </Link>
+        <Link to="/catalog" className="btn">
+          Back to Catalog
+        </Link>
       </p>
     </div>
   )

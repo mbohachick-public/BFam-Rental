@@ -110,7 +110,7 @@ export async function adminApi(request: APIRequestContext) {
       acknowledgments: {
         rental_agreement: true,
         damage_fee_schedule: true,
-        responsibility_fees: true,
+        financial_responsibility: true,
         payment_deposit_gate: true,
       },
     }

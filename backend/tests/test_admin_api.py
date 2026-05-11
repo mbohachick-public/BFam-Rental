@@ -363,7 +363,7 @@ def test_admin_approve_mark_and_confirm_booking(
         "acknowledgments": {
             "rental_agreement": True,
             "damage_fee_schedule": True,
-            "responsibility_fees": True,
+            "financial_responsibility": True,
             "payment_deposit_gate": True,
         },
     }

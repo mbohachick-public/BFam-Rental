@@ -35,7 +35,7 @@ from app.schemas import (
 )
 from app.repos.item_images import load_images_for_items
 from app.services.booking_response import booking_out_from_row
-from app.services.booking_storage import admin_booking_file_response
+from app.services.booking_storage import admin_booking_file_response, admin_executed_contract_file_response
 from app.services.dates import iter_days_inclusive
 from app.services.item_availability import day_availability_range
 from app.services.item_availability_seed import seed_day_status_for_new_item
@@ -502,6 +502,13 @@ def admin_booking_license_plate_file(
     request_id: str, client: Client = Depends(get_supabase_client)
 ):
     return admin_booking_file_response(client, request_id, "license-plate")
+
+
+@router.get("/booking-requests/{request_id}/executed-contract")
+def admin_booking_executed_contract_file(
+    request_id: str, client: Client = Depends(get_supabase_client)
+):
+    return admin_executed_contract_file_response(client, request_id)
 
 
 @router.post("/booking-requests/{request_id}/approve", response_model=BookingRequestOut)

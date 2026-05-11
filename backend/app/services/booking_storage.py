@@ -370,3 +370,36 @@ def customer_executed_contract_file_response(
         media_type="application/pdf",
         filename=f"rental-agreement-{request_id}.pdf",
     )
+
+
+def admin_executed_contract_file_response(
+    client: Client,
+    request_id: str,
+) -> FileResponse:
+    """PDF produced at signing; admin access (no customer ownership check)."""
+    settings = get_settings()
+    doc_res = (
+        client.table("booking_documents")
+        .select("pdf_path")
+        .eq("booking_id", request_id)
+        .eq("document_type", "EXECUTED_PACKET")
+        .limit(1)
+        .execute()
+    )
+    doc_rows = doc_res.data or []
+    if not doc_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+    raw_path = doc_rows[0].get("pdf_path")
+    if not raw_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+    p = Path(str(raw_path)).resolve()
+    root = Path(settings.contract_packets_dir).resolve()
+    if not str(p).startswith(str(root)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+    if not p.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract file missing")
+    return FileResponse(
+        p,
+        media_type="application/pdf",
+        filename=f"rental-agreement-{request_id}.pdf",
+    )

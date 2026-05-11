@@ -21,6 +21,30 @@ async function openBookingDocument(url: string, label: string) {
   }
 }
 
+async function downloadBookingDocument(
+  url: string,
+  opts: {
+    filename: string
+    label: string
+  },
+) {
+  const { filename, label } = opts
+  try {
+    const blob = await adminDownloadBlob(url)
+    const obj = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = obj
+    a.download = filename
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(obj), 30_000)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : `Could not download ${label}`)
+  }
+}
+
 function money(s: string | null | undefined) {
   if (s == null) return '—'
   const n = Number(s)
@@ -508,6 +532,39 @@ export function AdminBookingsPage() {
                       }
                     >
                       Insurance card
+                    </button>
+                  </>
+                ) : null}
+                {r.agreement_signed_at ? (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      className="doc-link"
+                      onClick={() =>
+                        void openBookingDocument(
+                          `/admin/booking-requests/${encodeURIComponent(r.id)}/executed-contract`,
+                          'Signed rental packet',
+                        )
+                      }
+                    >
+                      Signed rental packet
+                    </button>
+                    {' · '}
+                    <button
+                      type="button"
+                      className="doc-link"
+                      onClick={() =>
+                        void downloadBookingDocument(
+                          `/admin/booking-requests/${encodeURIComponent(r.id)}/executed-contract`,
+                          {
+                            filename: `rental-agreement-${r.id}.pdf`,
+                            label: 'Signed rental packet',
+                          },
+                        )
+                      }
+                    >
+                      Download signed PDF
                     </button>
                   </>
                 ) : null}

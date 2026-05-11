@@ -16,6 +16,30 @@ async function openBookingDocument(url: string, label: string) {
   }
 }
 
+async function downloadBookingDocument(
+  url: string,
+  opts: {
+    filename: string
+    label: string
+  },
+) {
+  const { filename, label } = opts
+  try {
+    const blob = await adminDownloadBlob(url)
+    const obj = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = obj
+    a.download = filename
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(obj), 30_000)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : `Could not download ${label}`)
+  }
+}
+
 function money(s: string | null | undefined) {
   if (s == null) return '—'
   const n = Number(s)
@@ -273,6 +297,43 @@ export function AdminBookingDetailPage() {
                 </>
               ) : null}
             </p>
+          </section>
+
+          <section className="card card-pad section-block">
+            <h2>Signed agreement</h2>
+            {row.agreement_signed_at ? (
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() =>
+                    openBookingDocument(
+                      `/admin/booking-requests/${encodeURIComponent(row.id)}/executed-contract`,
+                      'Signed rental packet',
+                    )
+                  }
+                >
+                  Open signed rental packet (PDF)
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() =>
+                    downloadBookingDocument(
+                      `/admin/booking-requests/${encodeURIComponent(row.id)}/executed-contract`,
+                      {
+                        filename: `rental-agreement-${row.id}.pdf`,
+                        label: 'Signed rental packet',
+                      },
+                    )
+                  }
+                >
+                  Download PDF
+                </button>
+              </div>
+            ) : (
+              <p className="muted">No signed agreement is on file yet for this request.</p>
+            )}
           </section>
 
           <section className="card card-pad section-block muted-block">

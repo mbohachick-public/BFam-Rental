@@ -16,7 +16,10 @@ async function withCustomerAuthHeaders(
   tokenOpts?: CustomerTokenOptions,
 ): Promise<Record<string, string>> {
   const out = { ...headers }
-  if (path.startsWith('/booking-requests') && customerAccessTokenGetter) {
+  if (
+    (path.startsWith('/booking-requests') || path.startsWith('/trailer-match')) &&
+    customerAccessTokenGetter
+  ) {
     try {
       const t = await customerAccessTokenGetter(tokenOpts)
       if (t) out.Authorization = `Bearer ${t}`

@@ -175,6 +175,11 @@ class BookingIntakeCreate(BaseModel):
     )
     #: Used for estimated tax until a full address is provided on Step 2.
     tax_postal_code: str | None = Field(default=None, max_length=16)
+    trailer_match_request_id: str | None = Field(
+        default=None,
+        max_length=48,
+        description="When set, links this booking to a prior Trailer Match Assistant submission.",
+    )
 
     @model_validator(mode="after")
     def _job_site_when_needed_intake(self) -> Self:
@@ -516,6 +521,9 @@ class BookingSignAcknowledgments(BaseModel):
     damage_fee_schedule: bool = False
     financial_responsibility: bool = False
     payment_deposit_gate: bool = False
+    indemnification_hold_harmless: bool = False
+    insurance_proof_required: bool = False
+    unattended_trailer_security: bool = False
 
 
 class BookingSignSubmit(BaseModel):
@@ -536,6 +544,9 @@ class BookingSignSubmit(BaseModel):
             and a.damage_fee_schedule
             and a.financial_responsibility
             and a.payment_deposit_gate
+            and a.indemnification_hold_harmless
+            and a.insurance_proof_required
+            and a.unattended_trailer_security
         ):
             raise ValueError("All acknowledgment checkboxes must be accepted.")
         return self
@@ -648,3 +659,148 @@ class E2eCleanupBody(BaseModel):
 class E2eCleanupResult(BaseModel):
     items_deleted: int
     bookings_processed_for_file_cleanup: int
+
+
+# --- Trailer Match Assistant (public + admin) ---
+
+
+class TrailerMatchTowPackage(str, Enum):
+    yes = "yes"
+    no = "no"
+    unknown = "unknown"
+
+
+class TrailerMatchBrakeController(str, Enum):
+    yes = "yes"
+    no = "no"
+    unknown = "unknown"
+
+
+class TrailerMatchExperience(str, Enum):
+    first_time = "first_time"
+    some = "some"
+    experienced = "experienced"
+
+
+class TrailerMatchLoadType(str, Enum):
+    mulch = "mulch"
+    topsoil = "topsoil"
+    gravel = "gravel"
+    brush = "brush"
+    construction = "construction"
+    household = "household"
+    other = "other"
+
+
+class TrailerMatchAmount(str, Enum):
+    y1 = "y1"
+    y2 = "y2"
+    y3 = "y3"
+    y4 = "y4"
+    y5plus = "y5plus"
+    unsure = "unsure"
+
+
+class TrailerMatchTier(str, Enum):
+    ten_seven = "10_7k"
+    twelve_ten = "12_10k"
+    twelve_twelve = "12_12k"
+
+
+class TrailerMatchConfidence(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class TrailerMatchFollowUp(str, Enum):
+    """Post-recommendation follow-up hint (not delivery-related)."""
+
+    book = "book"
+    ask_confirm = "ask_confirm"
+
+
+class TrailerMatchMode(str, Enum):
+    single_trailer = "single_trailer"
+    multi_load = "multi_load"
+    contact_required = "contact_required"
+    delivery_suggested = "delivery_suggested"
+
+
+class TrailerMatchAssistantIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    year: int = Field(..., ge=1980, le=2035)
+    make: str = Field(..., min_length=1, max_length=80)
+    model: str = Field(..., min_length=1, max_length=80)
+    trim_or_engine: str | None = Field(default=None, max_length=120)
+    tow_package: TrailerMatchTowPackage
+    brake_controller: TrailerMatchBrakeController
+    towing_experience: TrailerMatchExperience
+    load_type: TrailerMatchLoadType
+    estimated_amount: TrailerMatchAmount
+    session_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Opaque client session id (e.g. UUID) for anonymous correlation.",
+    )
+
+
+class TrailerMatchTrailerCard(BaseModel):
+    type: TrailerMatchTier
+    title: str
+    blurb: str
+
+
+class TrailerMatchAssistantOut(BaseModel):
+    id: str
+    mode: TrailerMatchMode
+    recommended: TrailerMatchTrailerCard | None
+    trailer_for_load: TrailerMatchTier | None = None
+    trailer_for_load_title: str | None = None
+    estimated_trips: int | None = None
+    job_fit: TrailerMatchConfidence
+    vehicle_fit: TrailerMatchConfidence
+    driver_fit: TrailerMatchConfidence
+    overall_confidence: TrailerMatchConfidence
+    alternative: TrailerMatchTrailerCard
+    estimated_weight_min_lbs: int | None
+    estimated_weight_max_lbs: int | None
+    confidence: TrailerMatchConfidence
+    reasons: list[str]
+    warnings: list[str]
+    ctas: list[str]
+    follow_up_cta: TrailerMatchFollowUp
+    delivery_cta_emphasized: bool
+    delivery_cta_reason: str | None = None
+    recommended_catalog_item_id: str | None
+    legal_disclaimer: str
+    estimate_disclaimer: str
+
+
+class TrailerMatchRequestAdminRow(BaseModel):
+    id: str
+    created_at: str
+    year: int
+    make: str
+    model: str
+    trim_or_engine: str | None
+    load_type: str
+    estimated_amount: str
+    mode: str | None = None
+    recommended_trailer_type: str | None = None
+    trailer_for_load: str | None = None
+    estimated_trips: int | None = None
+    job_fit: str | None = None
+    vehicle_fit: str | None = None
+    driver_fit: str | None = None
+    confidence: str | None = None
+    converted_to_booking: bool
+    delivery_cta_shown: bool
+    delivery_quote_clicked: bool
+    delivery_cta_reason: str | None = None
+    warnings: list[str]
+
+
+class TrailerMatchDeliveryQuoteClickOut(BaseModel):
+    ok: bool = True

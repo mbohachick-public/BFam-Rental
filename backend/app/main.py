@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.routers import admin, booking_actions, booking_requests, items, stripe_webhook
+from app.routers import admin, booking_actions, booking_requests, items, stripe_webhook, trailer_match
 from app.services.quote_email import smtp_configured
 
 _log = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ app.include_router(booking_requests.router)
 app.include_router(booking_actions.router)
 app.include_router(admin.router)
 app.include_router(stripe_webhook.router)
+app.include_router(trailer_match.router)
 
 
 @app.get("/")

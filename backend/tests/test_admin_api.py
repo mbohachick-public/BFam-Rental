@@ -334,6 +334,7 @@ def test_admin_approve_mark_and_confirm_booking(
         "sales_tax_source": "TEST",
         "drivers_license_path": f"{bid}/drivers_license.jpg",
         "license_plate_path": None,
+        "insurance_card_path": f"{bid}/insurance_card.jpg",
         "decline_reason": None,
         "created_at": "2026-04-01T00:00:00",
     })
@@ -354,6 +355,7 @@ def test_admin_approve_mark_and_confirm_booking(
     assert g.status_code == 200
     gj = g.json()
     assert "agreement_html" in gj
+    assert "Indemnification and Hold Harmless" in gj["agreement_html"]
     assert gj.get("customer_email") == "test@e2e.com"
     assert gj.get("customer_first_name") == "Test"
 
@@ -365,6 +367,9 @@ def test_admin_approve_mark_and_confirm_booking(
             "damage_fee_schedule": True,
             "financial_responsibility": True,
             "payment_deposit_gate": True,
+            "indemnification_hold_harmless": True,
+            "insurance_proof_required": True,
+            "unattended_trailer_security": True,
         },
     }
     with patch("app.services.quote_email.send_customer_booking_fully_complete_email") as complete_mail:
@@ -372,6 +377,10 @@ def test_admin_approve_mark_and_confirm_booking(
     assert ps.status_code == 200
     complete_mail.assert_not_called()
     assert ps.json()["next_status"] == "approved_pending_payment"
+    docs = db_store.get("booking_documents") or []
+    executed = [d for d in docs if d.get("document_type") == "EXECUTED_PACKET"]
+    assert len(executed) == 1
+    assert executed[0].get("document_version") == "2026-06-05"
 
     assert (
         client.post(
@@ -398,6 +407,54 @@ def test_admin_approve_mark_and_confirm_booking(
     cf = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
     assert cf.status_code == 400
     get_settings.cache_clear()
+
+
+def test_admin_confirm_blocked_customer_pickup_without_insurance(client, admin_headers, seed_item, db_store):
+    import uuid as _uuid
+
+    bid = str(_uuid.uuid4())
+    db_store["booking_requests"].append({
+        "id": bid,
+        "item_id": seed_item()["id"],
+        "start_date": "2026-06-10",
+        "end_date": "2026-06-11",
+        "status": "approved_pending_payment",
+        "customer_email": "pickup@test.com",
+        "delivery_requested": False,
+        "pickup_from_site_requested": False,
+        "rental_paid_at": "2026-06-01T00:00:00+00:00",
+        "deposit_secured_at": "2026-06-01T00:00:00+00:00",
+        "agreement_signed_at": "2026-06-01T00:00:00+00:00",
+        "insurance_card_path": None,
+    })
+    res = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
+    assert res.status_code == 400
+    assert "insurance" in res.json()["detail"].lower()
+
+
+def test_admin_confirm_allows_delivery_without_tow_insurance(client, admin_headers, seed_item, db_store):
+    import uuid as _uuid
+
+    item = seed_item()
+    bid = str(_uuid.uuid4())
+    db_store["booking_requests"].append({
+        "id": bid,
+        "item_id": item["id"],
+        "start_date": "2026-06-10",
+        "end_date": "2026-06-11",
+        "status": "approved_pending_payment",
+        "customer_email": "delivery@test.com",
+        "delivery_requested": True,
+        "pickup_from_site_requested": False,
+        "delivery_address": "100 Job Site Rd",
+        "rental_paid_at": "2026-06-01T00:00:00+00:00",
+        "agreement_signed_at": "2026-06-01T00:00:00+00:00",
+        "insurance_card_path": None,
+    })
+    res = client.post(f"/admin/booking-requests/{bid}/confirm", headers=admin_headers)
+    assert res.status_code == 200
+    row = next(r for r in db_store["booking_requests"] if r["id"] == bid)
+    assert row["status"] == "confirmed"
 
 
 def test_admin_get_booking_detail(client, admin_headers, seed_item, db_store):

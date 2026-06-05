@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import logging
+import uuid
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
@@ -71,6 +72,33 @@ from app.services.stripe_customer_setup import create_booking_setup_intent, stri
 router = APIRouter(prefix="/booking-requests", tags=["booking-requests"])
 
 log = logging.getLogger(__name__)
+
+
+def _parse_trailer_match_request_id(raw: str | None) -> str | None:
+    if not raw or not str(raw).strip():
+        return None
+    s = str(raw).strip()
+    try:
+        uuid.UUID(s)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="trailer_match_request_id must be a valid UUID.",
+        ) from e
+    return s
+
+
+def _mark_trailer_match_converted(client: Client, trailer_match_request_id: str, booking_id: str) -> None:
+    try:
+        client.table("trailer_match_requests").update(
+            {"converted_to_booking": True, "booking_id": booking_id}
+        ).eq("id", trailer_match_request_id).eq("converted_to_booking", False).execute()
+    except Exception:
+        log.exception(
+            "trailer_match_requests converted update failed trailer_match_request_id=%s booking_id=%s",
+            trailer_match_request_id,
+            booking_id,
+        )
 
 
 def _rental_days_inclusive_or_400(start: date, end: date) -> list[date]:
@@ -638,6 +666,9 @@ def create_booking_intake(
     row = data[0]
     bid = str(row["id"])
     _upsert_booking_date_hold(client, body.item_id, body.start_date, body.end_date)
+    tmid = _parse_trailer_match_request_id(body.trailer_match_request_id)
+    if tmid:
+        _mark_trailer_match_converted(client, tmid, bid)
     base_fe = (settings.frontend_public_url or "").strip().rstrip("/")
     complete_url = f"{base_fe}/booking/{bid}/complete"
     em = str(body.customer_email).strip()

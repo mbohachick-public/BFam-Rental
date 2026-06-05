@@ -24,6 +24,9 @@ export function Layout() {
             <NavLink to="/catalog" className="nav-link">
               Catalog
             </NavLink>
+            <NavLink to="/trailer-match" className="nav-link">
+              Trailer match
+            </NavLink>
             {customer.mode === 'auth0' && !customer.isLoading && (
               <>
                 {customer.isAuthenticated ? (

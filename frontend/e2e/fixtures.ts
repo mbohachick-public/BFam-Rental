@@ -112,6 +112,9 @@ export async function adminApi(request: APIRequestContext) {
         damage_fee_schedule: true,
         financial_responsibility: true,
         payment_deposit_gate: true,
+        indemnification_hold_harmless: true,
+        insurance_proof_required: true,
+        unattended_trailer_security: true,
       },
     }
     const res = await request.post(`${API_BASE}/booking-actions/${token}/sign`, {

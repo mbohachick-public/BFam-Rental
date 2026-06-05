@@ -269,6 +269,7 @@ def test_stripe_webhook_sends_customer_completion_email_when_signed_and_rental_p
             "customer_email": "done@test.com",
             "rental_total_with_tax": 100.0,
             "deposit_amount": 0.0,
+            "insurance_card_path": f"{bid}/insurance_card.jpg",
         }
     )
 
@@ -330,6 +331,7 @@ def test_stripe_webhook_holds_customer_email_until_deposit_when_deposit_required
             "customer_email": "dep@test.com",
             "rental_total_with_tax": 100.0,
             "deposit_amount": 50.0,
+            "insurance_card_path": f"{bid}/insurance_card.jpg",
         }
     )
 

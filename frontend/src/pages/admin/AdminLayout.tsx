@@ -95,6 +95,9 @@ export function AdminLayout() {
         <NavLink to="/admin/bookings" className="nav-link">
           Booking requests
         </NavLink>
+        <NavLink to="/admin/trailer-match-requests" className="nav-link">
+          Trailer match
+        </NavLink>
         <NavLink to="/admin/delivery-settings" className="nav-link">
           Delivery
         </NavLink>

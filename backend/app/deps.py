@@ -208,6 +208,50 @@ def customer_jwt_claims(
         ) from None
 
 
+def optional_customer_jwt_claims(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict | None:
+    """
+    When customer Auth0 is configured, validate Bearer if present; otherwise return None.
+    Missing Bearer is allowed (anonymous assistant). Malformed or invalid Bearer returns 401.
+    """
+    settings = get_settings()
+    domain = (settings.auth0_domain or "").strip()
+    audience = (settings.auth0_audience or "").strip()
+    if not domain or not audience:
+        return None
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization[7:].strip()
+    if not token:
+        return None
+    try:
+        return verify_auth0_access_token(
+            token,
+            domain=domain,
+            audience=audience,
+            domain_aliases=settings.auth0_domain_aliases,
+        )
+    except PyJWKClientConnectionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Cannot reach Auth0 to verify sign-in (JWKS). "
+                "Allow outbound HTTPS from this API to your AUTH0_DOMAIN and check the domain value."
+            ),
+        ) from e
+    except pyjwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        ) from None
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Auth0 configuration error",
+        ) from None
+
+
 def require_customer_jwt(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:

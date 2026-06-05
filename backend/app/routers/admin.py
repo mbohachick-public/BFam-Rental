@@ -31,10 +31,12 @@ from app.schemas import (
     ResendSignatureOut,
     StripeCheckoutSessionOut,
     StripeCheckoutSyncOut,
+    TrailerMatchRequestAdminRow,
     payment_path_from_stored,
 )
 from app.repos.item_images import load_images_for_items
 from app.services.booking_response import booking_out_from_row
+from app.services.contract_render import is_customer_pickup_fulfillment
 from app.services.booking_storage import admin_booking_file_response, admin_executed_contract_file_response
 from app.services.dates import iter_days_inclusive
 from app.services.item_availability import day_availability_range
@@ -73,6 +75,64 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 def admin_session() -> dict[str, bool]:
     """Confirm the caller's Bearer token is authorized for admin routes (same checks as require_admin)."""
     return {"admin": True}
+
+
+@router.get("/trailer-match-requests", response_model=list[TrailerMatchRequestAdminRow])
+def admin_list_trailer_match_requests(
+    client: Client = Depends(get_supabase_client),
+) -> list[TrailerMatchRequestAdminRow]:
+    """Recent Trailer Match Assistant submissions (market research)."""
+    res = (
+        client.table("trailer_match_requests")
+        .select(
+            "id,created_at,year,make,model,trim_or_engine,load_type,estimated_amount,mode,"
+            "recommended_trailer_type,trailer_for_load,estimated_trips,job_fit,vehicle_fit,driver_fit,confidence,"
+            "converted_to_booking,warnings,delivery_cta_shown,delivery_quote_clicked,delivery_cta_reason"
+        )
+        .order("created_at", desc=True)
+        .limit(200)
+        .execute()
+    )
+    out: list[TrailerMatchRequestAdminRow] = []
+    for row in res.data or []:
+        w = row.get("warnings")
+        if isinstance(w, str):
+            try:
+                import json
+
+                w = json.loads(w)
+            except Exception:
+                w = []
+        if not isinstance(w, list):
+            w = []
+        out.append(
+            TrailerMatchRequestAdminRow(
+                id=str(row["id"]),
+                created_at=str(row.get("created_at") or ""),
+                year=int(row["year"]),
+                make=str(row.get("make") or ""),
+                model=str(row.get("model") or ""),
+                trim_or_engine=(str(row["trim_or_engine"]) if row.get("trim_or_engine") else None),
+                load_type=str(row.get("load_type") or ""),
+                estimated_amount=str(row.get("estimated_amount") or ""),
+                mode=(str(row["mode"]) if row.get("mode") else None),
+                recommended_trailer_type=(
+                    str(row["recommended_trailer_type"]) if row.get("recommended_trailer_type") is not None else None
+                ),
+                trailer_for_load=(str(row["trailer_for_load"]) if row.get("trailer_for_load") else None),
+                estimated_trips=(int(row["estimated_trips"]) if row.get("estimated_trips") is not None else None),
+                job_fit=(str(row["job_fit"]) if row.get("job_fit") else None),
+                vehicle_fit=(str(row["vehicle_fit"]) if row.get("vehicle_fit") else None),
+                driver_fit=(str(row["driver_fit"]) if row.get("driver_fit") else None),
+                confidence=(str(row["confidence"]) if row.get("confidence") is not None else None),
+                converted_to_booking=bool(row.get("converted_to_booking")),
+                delivery_cta_shown=bool(row.get("delivery_cta_shown")),
+                delivery_quote_clicked=bool(row.get("delivery_quote_clicked")),
+                delivery_cta_reason=(str(row["delivery_cta_reason"]) if row.get("delivery_cta_reason") else None),
+                warnings=[str(x) for x in w],
+            )
+        )
+    return out
 
 
 def _decimal(v: object) -> Decimal:
@@ -852,6 +912,15 @@ def admin_mark_agreement_signed(
     return booking_out_from_row(client, res2.data[0], sign_document_urls=True)
 
 
+def _enforce_confirm_gates(row: dict) -> None:
+    """Block confirm until pickup rentals have proof of insurance on file."""
+    if is_customer_pickup_fulfillment(row) and not (row.get("insurance_card_path") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Confirm blocked until proof of insurance is uploaded for customer pickup rentals.",
+        )
+
+
 @router.post("/booking-requests/{request_id}/confirm", response_model=BookingRequestOut)
 def admin_confirm_booking(
     request_id: str, client: Client = Depends(get_supabase_client)
@@ -867,6 +936,7 @@ def admin_confirm_booking(
             status_code=400,
             detail="Only approved (awaiting payment) bookings can be confirmed.",
         )
+    _enforce_confirm_gates(row)
     missing: list[str] = []
     rp = str(row.get("rental_payment_status") or "").strip().lower()
     if not row.get("rental_paid_at") and rp != "paid":

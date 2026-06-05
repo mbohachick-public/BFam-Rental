@@ -13,11 +13,13 @@ import { AdminBookingsPage } from './pages/admin/AdminBookingsPage'
 import { AdminDeliverySettingsPage } from './pages/admin/AdminDeliverySettingsPage'
 import { AdminItemFormPage } from './pages/admin/AdminItemFormPage'
 import { AdminItemsPage } from './pages/admin/AdminItemsPage'
+import { AdminTrailerMatchPage } from './pages/admin/AdminTrailerMatchPage'
 import { AdminLayout } from './pages/admin/AdminLayout'
 import { BookingCompletePage } from './pages/BookingCompletePage'
 import { BookingSignCompletePage } from './pages/BookingSignCompletePage'
 import { BookingSignPage } from './pages/BookingSignPage'
 import { PaymentSuccessPage } from './pages/PaymentSuccessPage'
+import { TrailerMatchAssistantPage } from './pages/TrailerMatchAssistantPage'
 
 export default function App() {
   return (
@@ -28,6 +30,7 @@ export default function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<HomePage />} />
               <Route path="catalog" element={<CatalogPage />} />
+              <Route path="trailer-match" element={<TrailerMatchAssistantPage />} />
               <Route path="items/:id" element={<ItemDetailPage />} />
               <Route path="booking/:id/complete" element={<BookingCompletePage />} />
               <Route path="my-rentals" element={<MyRentalsPage />} />
@@ -45,6 +48,7 @@ export default function App() {
               <Route path="items/:id/availability" element={<AdminAvailabilityPage />} />
               <Route path="bookings" element={<AdminBookingsPage />} />
               <Route path="bookings/:id" element={<AdminBookingDetailPage />} />
+              <Route path="trailer-match-requests" element={<AdminTrailerMatchPage />} />
               <Route path="delivery-settings" element={<AdminDeliverySettingsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

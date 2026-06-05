@@ -25,6 +25,9 @@ export function BookingSignPage() {
   const [ackDamage, setAckDamage] = useState(false)
   const [ackFinancial, setAckFinancial] = useState(false)
   const [ackPay, setAckPay] = useState(false)
+  const [ackIndemnification, setAckIndemnification] = useState(false)
+  const [ackInsuranceProof, setAckInsuranceProof] = useState(false)
+  const [ackUnattended, setAckUnattended] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -62,7 +65,14 @@ export function BookingSignPage() {
   }, [data])
 
   const typedSignatureOk = Boolean(typedSignature.trim())
-  const allAcknowledged = ackRental && ackDamage && ackFinancial && ackPay
+  const allAcknowledged =
+    ackRental &&
+    ackDamage &&
+    ackFinancial &&
+    ackPay &&
+    ackIndemnification &&
+    ackInsuranceProof &&
+    ackUnattended
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -82,6 +92,9 @@ export function BookingSignPage() {
           damage_fee_schedule: ackDamage,
           financial_responsibility: ackFinancial,
           payment_deposit_gate: ackPay,
+          indemnification_hold_harmless: ackIndemnification,
+          insurance_proof_required: ackInsuranceProof,
+          unattended_trailer_security: ackUnattended,
         },
       }
       const co = companyName.trim()
@@ -255,6 +268,40 @@ export function BookingSignPage() {
             <span>
               I understand the trailer will not be released until payment and deposit requirements are
               satisfied.
+            </span>
+          </label>
+          <label className="field field-checkbox field-span">
+            <input
+              type="checkbox"
+              checked={ackIndemnification}
+              onChange={(e) => setAckIndemnification(e.target.checked)}
+            />
+            <span>
+              I agree to defend, indemnify, and hold harmless {LEGAL_BUSINESS_NAME} as stated in this
+              Rental Agreement.
+            </span>
+          </label>
+          <label className="field field-checkbox field-span">
+            <input
+              type="checkbox"
+              checked={ackInsuranceProof}
+              onChange={(e) => setAckInsuranceProof(e.target.checked)}
+            />
+            <span>
+              I understand proof of valid automobile insurance is required before release of any trailer
+              for customer pickup.
+            </span>
+          </label>
+          <label className="field field-checkbox field-span">
+            <input
+              type="checkbox"
+              checked={ackUnattended}
+              onChange={(e) => setAckUnattended(e.target.checked)}
+            />
+            <span>
+              I understand I am responsible for securing the trailer when unattended and remain
+              responsible for losses, theft, vandalism, rollaway, damage, injury, towing, recovery, and
+              impound costs while the trailer is in my possession, custody, or control.
             </span>
           </label>
           <label className="field">

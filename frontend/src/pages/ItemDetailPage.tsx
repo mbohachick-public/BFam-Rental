@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
 import { useCustomerSession } from '../context/CustomerSessionContext'
 import { MonthCalendar } from '../components/MonthCalendar'
@@ -71,6 +71,7 @@ function prettifyLogisticsErrorMessage(raw: string): string {
 
 export function ItemDetailPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const customer = useCustomerSession()
   const customerSignedIn = customer.mode === 'auth0' && customer.isAuthenticated
   const authBlocksSubmit = customer.mode === 'auth0' && !customer.isLoading && !customer.isAuthenticated
@@ -321,6 +322,14 @@ export function ItemDetailPage() {
     setSubmitPhase('saving')
     setQuoteError(null)
     setLogisticsAddressError(null)
+    const tmrRaw = searchParams.get('tmr')?.trim()
+    let tmrStored: string | null = null
+    try {
+      tmrStored = sessionStorage.getItem('trailer_match_request_id')
+    } catch {
+      tmrStored = null
+    }
+    const trailerMatchRequestId = (tmrRaw || tmrStored || '').trim() || undefined
     const phaseTimer = window.setTimeout(() => {
       setSubmitPhase((p) => (p === 'saving' ? 'email' : p))
     }, 500)
@@ -342,8 +351,14 @@ export function ItemDetailPage() {
         ...(item.delivery_available && (deliverToSite || pickupFromSite)
           ? { job_site_address: logisticsAddress.trim() }
           : {}),
+        ...(trailerMatchRequestId ? { trailer_match_request_id: trailerMatchRequestId } : {}),
       })
       ok = true
+      try {
+        if (trailerMatchRequestId) sessionStorage.removeItem('trailer_match_request_id')
+      } catch {
+        /* ignore */
+      }
       window.clearTimeout(phaseTimer)
       setSubmitPhase('redirect')
       navigate(out.complete_path)
@@ -481,6 +496,19 @@ export function ItemDetailPage() {
         </div>
         <MonthCalendar year={calYear} month={calMonth} days={days} />
       </section>
+
+      {item.towable ? (
+        <section className="card card-pad section-block">
+          <h2>Trailer Match Assistant</h2>
+          <p className="muted">
+            Picking between dump trailer sizes? Answer a few questions and we will suggest a trailer and plain-English
+            watch-outs—not a certified safety rating.
+          </p>
+          <Link className="btn btn-secondary" to="/trailer-match">
+            Open Trailer Match Assistant
+          </Link>
+        </section>
+      ) : null}
 
       <section className="card card-pad section-block booking-block">
         <h2>Step 1 of 2 — Request booking</h2>

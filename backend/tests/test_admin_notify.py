@@ -20,8 +20,25 @@ def test_booking_row_ready_for_confirm_true():
         "deposit_amount": 0,
         "deposit_secured_at": None,
         "agreement_signed_at": "2026-04-01T00:00:00",
+        "delivery_requested": True,
+        "pickup_from_site_requested": False,
     }
     assert booking_row_ready_for_confirm(row) is True
+
+
+def test_booking_row_ready_for_confirm_pickup_needs_insurance():
+    row = {
+        "status": "approved_pending_payment",
+        "rental_paid_at": "2026-04-01T00:00:00",
+        "rental_payment_status": "paid",
+        "deposit_amount": 0,
+        "deposit_secured_at": None,
+        "agreement_signed_at": "2026-04-01T00:00:00",
+        "delivery_requested": False,
+        "pickup_from_site_requested": False,
+        "insurance_card_path": None,
+    }
+    assert booking_row_ready_for_confirm(row) is False
 
 
 def test_booking_row_ready_for_confirm_needs_deposit():
@@ -129,6 +146,7 @@ def test_try_notify_confirm_sends_once(fake_client, fake_settings, db_store, see
             "deposit_amount": 0,
             "deposit_secured_at": None,
             "agreement_signed_at": "2026-04-01T00:00:00",
+            "insurance_card_path": "b2222222-2222-2222-2222-222222222222/insurance_card.jpg",
         }
     )
     with patch("app.services.admin_notify.try_send_email", return_value=True) as send:

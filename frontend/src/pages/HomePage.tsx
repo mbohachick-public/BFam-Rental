@@ -24,7 +24,7 @@ export function HomePage() {
           </Link>
         </div>
       </section>
-      <section className="features" aria-labelledby="features-heading">
+      <section className="features" id="delivery-quote" aria-labelledby="features-heading">
         <h2 id="features-heading" className="visually-hidden">
           Why book with us
         </h2>

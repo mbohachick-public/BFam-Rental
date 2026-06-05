@@ -103,6 +103,18 @@ export function CatalogPage() {
         in the range must be open for booking).
       </p>
 
+      <div className="card card-pad catalog-trailer-match-banner">
+        <strong>Trailer Match Assistant</strong>
+        <span className="muted"> — </span>
+        <span className="muted">
+          Not sure which dump trailer fits your truck and job? Get a quick, plain-English suggestion (not a safety
+          certification).
+        </span>{' '}
+        <Link to="/trailer-match" className="btn btn-secondary btn-sm">
+          Open assistant
+        </Link>
+      </div>
+
       <details
         ref={filtersRef}
         className="filters-collapsible card"

@@ -18,8 +18,10 @@ from app.services.booking_events import log_booking_event
 from app.services.contract_pdf import build_executed_packet_pdf, sha256_bytes
 from app.services.contract_render import (
     DOCUMENT_VERSION,
+    EXECUTED_PACKET_ACKNOWLEDGMENTS,
     render_damage_fee_schedule_html,
     render_rental_agreement_html,
+    rental_agreement_pdf_body_lines,
     sha256_hex,
 )
 
@@ -298,12 +300,7 @@ def complete_customer_signature(
         "Status": "Executed",
     }
     # Executed packet should reflect final required checkboxes (no duplicates).
-    acks = [
-        "I have reviewed and agree to the Rental Agreement, including pricing, deposit terms, and responsibilities for damage and loss.",
-        "I have reviewed and acknowledge the Damage & Fee Schedule Addendum.",
-        "I understand I am financially responsible for any damage, loss, misuse, or loss of use of the equipment during the rental period, including amounts exceeding the security deposit.",
-        "I understand the equipment will not be released until payment and deposit requirements are satisfied and the booking is confirmed.",
-    ]
+    acks = list(EXECUTED_PACKET_ACKNOWLEDGMENTS)
     next_steps = [
         "Check your email for pickup or delivery instructions before heading out.",
         "Equipment is not released until payment, deposit, and confirmation requirements are complete.",
@@ -346,28 +343,7 @@ def complete_customer_signature(
         "Renter is responsible for loss of use of the equipment during repair periods caused by damage, misuse, late return, or failure to return the equipment in acceptable condition.",
         "Renter acknowledges the equipment is accepted in good working condition unless otherwise noted at pickup or delivery.",
         "",
-        "Insurance",
-        "Renter represents and agrees that they carry valid automobile insurance that covers the towing and operation of the rented equipment.",
-        "Bohachick Rentals & Supply LLC does not provide insurance coverage for the rented equipment.",
-        "Renter is solely responsible for any damage, loss, or liability arising from the use of the equipment, regardless of insurance coverage.",
-        "Proof of insurance may be requested prior to release of the equipment or at any time during the rental period.",
-        "",
-        "Prohibited Uses",
-        "Renter agrees NOT to use the equipment for any of the following:",
-        "• Overloading the trailer beyond its rated capacity or unevenly loading cargo",
-        "• Transporting hazardous, illegal, or prohibited materials",
-        "• Hauling materials that can permanently damage the trailer (including but not limited to concrete, asphalt, corrosive chemicals, or hot materials) without prior approval",
-        "• Using the trailer in a reckless, unsafe, or unlawful manner",
-        "• Operating the trailer while under the influence of alcohol or drugs",
-        "• Allowing any unlicensed or unqualified person to tow or operate the trailer",
-        "• Using the trailer for commercial purposes not disclosed at the time of booking",
-        "• Subleasing, lending, or transferring the trailer to any third party",
-        "• Modifying, altering, or tampering with the trailer or its components",
-        "• Operating the trailer outside the intended use (including off-road misuse, stunt use, or racing)",
-        "• Failing to properly secure loads, resulting in damage or safety risk",
-        "• Continuing to use the trailer after noticing mechanical issues or damage",
-        "Violation of any prohibited use may result in additional charges, forfeiture of the security deposit, and renter responsibility for all resulting damage, repair, and loss of use.",
-    ]
+    ] + rental_agreement_pdf_body_lines(owner=owner)
     pdf_bytes = build_executed_packet_pdf(
         booking_summary=summary,
         rental_agreement_lines=rental_agreement_lines,

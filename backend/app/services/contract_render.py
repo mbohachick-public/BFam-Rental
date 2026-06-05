@@ -10,7 +10,7 @@ from typing import Any
 from app.branding import LEGAL_BUSINESS_NAME
 
 
-DOCUMENT_VERSION = "2026-04-16"
+DOCUMENT_VERSION = "2026-06-05"
 
 DamageFeeRange = dict[str, str]
 
@@ -103,22 +103,188 @@ def _ctx(booking: dict[str, Any], item_title: str) -> dict[str, str]:
     }
 
 
+def is_customer_pickup_fulfillment(booking: dict[str, Any]) -> bool:
+    """Renter picks up and returns the trailer (not delivery or pickup-from-site service)."""
+    return not bool(booking.get("delivery_requested")) and not bool(booking.get("pickup_from_site_requested"))
+
+
+def _fulfillment_lines(booking: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    if is_customer_pickup_fulfillment(booking):
+        lines.append("Customer pickup and return")
+    if bool(booking.get("delivery_requested")):
+        lines.append("Delivery to job site")
+    if bool(booking.get("pickup_from_site_requested")):
+        lines.append("Pickup from job site")
+    return lines
+
+
+def _insurance_section_html(owner: str) -> str:
+    return f"""<h2>Insurance</h2>
+<p>
+Renter represents and agrees that they carry valid automobile insurance that covers the towing and operation of the rented equipment.
+</p>
+<p>
+{owner} does not provide insurance coverage for the rented equipment.
+</p>
+<p>
+Proof of valid automobile insurance is required before release of any trailer for customer pickup. {owner} may refuse rental, cancel a reservation, or withhold release of equipment if satisfactory proof of insurance is not provided.
+</p>
+<p>
+Renter represents and agrees that the insurance information provided is accurate, valid, and in force during the rental period.
+</p>
+<p>
+Renter agrees to notify {owner} immediately if insurance coverage is cancelled, expired, suspended, or otherwise unavailable during the rental period.
+</p>
+<p>
+Renter acknowledges that automobile liability while towing generally follows the tow vehicle and that Renter remains responsible for safe towing, lawful operation, property damage, bodily injury, damage to the rented equipment, theft, loss, misuse, and any amounts not covered by insurance.
+</p>"""
+
+
+def _indemnification_section_html(owner: str) -> str:
+    return f"""<h2>Indemnification and Hold Harmless</h2>
+<p>
+To the fullest extent permitted by law, Renter agrees to defend, indemnify, and hold harmless {owner}, its members, managers, officers, employees, agents, successors, and assigns from and against any and all claims, demands, lawsuits, liabilities, damages, losses, judgments, fines, penalties, costs, and expenses, including reasonable attorney fees, arising out of or related to:
+</p>
+<ul>
+<li>Renter&apos;s possession, towing, loading, unloading, operation, storage, transportation, maintenance, or use of the equipment;</li>
+<li>Injury to persons, including death;</li>
+<li>Damage to property;</li>
+<li>Cargo loss;</li>
+<li>Violations of law;</li>
+<li>Negligent or improper towing, loading, or operation of the equipment;</li>
+<li>Any breach of this Rental Agreement by Renter.</li>
+</ul>
+<p>
+This obligation applies whether the claim is brought by the Renter, a passenger, a third party, a governmental entity, or any other person.
+</p>
+<p>
+This indemnification obligation shall survive the expiration or termination of the rental period.
+</p>
+<p>
+Nothing in this provision shall require Renter to indemnify {owner} for damages caused solely by {owner}&apos;s gross negligence or willful misconduct.
+</p>"""
+
+
+def _unattended_trailer_section_html() -> str:
+    return """<h2>Unattended Trailer and Security Responsibility</h2>
+<p>
+Renter shall not leave the trailer unattended unless it is properly secured against movement, theft, vandalism, and unauthorized use.
+</p>
+<p>
+When unattended, Renter must use reasonable safeguards, including as applicable:
+</p>
+<ul>
+<li>Parking on stable and level ground;</li>
+<li>Setting the tow vehicle parking brake when attached;</li>
+<li>Chocking wheels when detached or when conditions require;</li>
+<li>Locking or securing the coupler when detached;</li>
+<li>Keeping the trailer in a safe and lawful location;</li>
+<li>Avoiding storage in areas where theft, vandalism, flooding, traffic impact, or property damage risk is elevated.</li>
+</ul>
+<p>
+Renter remains responsible for theft, vandalism, collision, rollaway, property damage, bodily injury, fines, towing, recovery costs, impound charges, and all losses occurring while the trailer is in Renter&apos;s possession, custody, or control.
+</p>"""
+
+
+def _prohibited_uses_section_html() -> str:
+    return """<h2>Prohibited Uses</h2>
+<p>Renter agrees <strong>NOT</strong> to use the equipment for any of the following:</p>
+<ul>
+<li>Overloading the trailer beyond its rated capacity or unevenly loading cargo</li>
+<li>Transporting hazardous, illegal, or prohibited materials</li>
+<li>Hauling materials that can permanently damage the trailer (including but not limited to concrete, asphalt, corrosive chemicals, or hot materials) without prior approval</li>
+<li>Using the trailer in a reckless, unsafe, or unlawful manner</li>
+<li>Operating the trailer while under the influence of alcohol or drugs</li>
+<li>Allowing any unlicensed or unqualified person to tow or operate the trailer</li>
+<li>Using the trailer for commercial purposes not disclosed at the time of booking</li>
+<li>Subleasing, lending, or transferring the trailer to any third party</li>
+<li>Modifying, altering, or tampering with the trailer or its components</li>
+<li>Operating the trailer outside the intended use (including off-road misuse, stunt use, or racing)</li>
+<li>Failing to properly secure loads, resulting in damage or safety risk</li>
+<li>Continuing to use the trailer after noticing mechanical issues or damage</li>
+</ul>
+<p>
+Violation of any prohibited use may result in additional charges, forfeiture of the security deposit, and renter responsibility for all resulting damage, repair, and loss of use.
+</p>"""
+
+
+EXECUTED_PACKET_ACKNOWLEDGMENTS: list[str] = [
+    "I have reviewed and agree to the Rental Agreement, including pricing, deposit terms, and responsibilities for damage and loss.",
+    "I have reviewed and acknowledge the Damage & Fee Schedule Addendum.",
+    "I understand I am financially responsible for any damage, loss, misuse, or loss of use of the equipment during the rental period, including amounts exceeding the security deposit.",
+    "I understand the equipment will not be released until payment and deposit requirements are satisfied and the booking is confirmed.",
+    "I agree to defend, indemnify, and hold harmless Bohachick Rentals & Supply LLC as stated in this Rental Agreement.",
+    "I understand proof of valid automobile insurance is required before release of any trailer for customer pickup.",
+    "I understand I am responsible for securing the trailer when unattended and remain responsible for losses, theft, vandalism, rollaway, damage, injury, towing, recovery, and impound costs while the trailer is in my possession, custody, or control.",
+]
+
+
+def rental_agreement_pdf_body_lines(*, owner: str) -> list[str]:
+    """Plain-text rental agreement body for executed PDF (matches HTML legal sections)."""
+    return [
+        "Insurance",
+        "Renter represents and agrees that they carry valid automobile insurance that covers the towing and operation of the rented equipment.",
+        f"{owner} does not provide insurance coverage for the rented equipment.",
+        f"Proof of valid automobile insurance is required before release of any trailer for customer pickup. {owner} may refuse rental, cancel a reservation, or withhold release of equipment if satisfactory proof of insurance is not provided.",
+        "Renter represents and agrees that the insurance information provided is accurate, valid, and in force during the rental period.",
+        f"Renter agrees to notify {owner} immediately if insurance coverage is cancelled, expired, suspended, or otherwise unavailable during the rental period.",
+        "Renter acknowledges that automobile liability while towing generally follows the tow vehicle and that Renter remains responsible for safe towing, lawful operation, property damage, bodily injury, damage to the rented equipment, theft, loss, misuse, and any amounts not covered by insurance.",
+        "",
+        "Indemnification and Hold Harmless",
+        f"To the fullest extent permitted by law, Renter agrees to defend, indemnify, and hold harmless {owner}, its members, managers, officers, employees, agents, successors, and assigns from and against any and all claims, demands, lawsuits, liabilities, damages, losses, judgments, fines, penalties, costs, and expenses, including reasonable attorney fees, arising out of or related to:",
+        "• Renter's possession, towing, loading, unloading, operation, storage, transportation, maintenance, or use of the equipment;",
+        "• Injury to persons, including death;",
+        "• Damage to property;",
+        "• Cargo loss;",
+        "• Violations of law;",
+        "• Negligent or improper towing, loading, or operation of the equipment;",
+        "• Any breach of this Rental Agreement by Renter.",
+        "This obligation applies whether the claim is brought by the Renter, a passenger, a third party, a governmental entity, or any other person.",
+        "This indemnification obligation shall survive the expiration or termination of the rental period.",
+        f"Nothing in this provision shall require Renter to indemnify {owner} for damages caused solely by {owner}'s gross negligence or willful misconduct.",
+        "",
+        "Unattended Trailer and Security Responsibility",
+        "Renter shall not leave the trailer unattended unless it is properly secured against movement, theft, vandalism, and unauthorized use.",
+        "When unattended, Renter must use reasonable safeguards, including as applicable:",
+        "• Parking on stable and level ground;",
+        "• Setting the tow vehicle parking brake when attached;",
+        "• Chocking wheels when detached or when conditions require;",
+        "• Locking or securing the coupler when detached;",
+        "• Keeping the trailer in a safe and lawful location;",
+        "• Avoiding storage in areas where theft, vandalism, flooding, traffic impact, or property damage risk is elevated.",
+        "Renter remains responsible for theft, vandalism, collision, rollaway, property damage, bodily injury, fines, towing, recovery costs, impound charges, and all losses occurring while the trailer is in Renter's possession, custody, or control.",
+        "",
+        "Prohibited Uses",
+        "Renter agrees NOT to use the equipment for any of the following:",
+        "• Overloading the trailer beyond its rated capacity or unevenly loading cargo",
+        "• Transporting hazardous, illegal, or prohibited materials",
+        "• Hauling materials that can permanently damage the trailer (including but not limited to concrete, asphalt, corrosive chemicals, or hot materials) without prior approval",
+        "• Using the trailer in a reckless, unsafe, or unlawful manner",
+        "• Operating the trailer while under the influence of alcohol or drugs",
+        "• Allowing any unlicensed or unqualified person to tow or operate the trailer",
+        "• Using the trailer for commercial purposes not disclosed at the time of booking",
+        "• Subleasing, lending, or transferring the trailer to any third party",
+        "• Modifying, altering, or tampering with the trailer or its components",
+        "• Operating the trailer outside the intended use (including off-road misuse, stunt use, or racing)",
+        "• Failing to properly secure loads, resulting in damage or safety risk",
+        "• Continuing to use the trailer after noticing mechanical issues or damage",
+        "Violation of any prohibited use may result in additional charges, forfeiture of the security deposit, and renter responsibility for all resulting damage, repair, and loss of use.",
+    ]
+
+
 def render_rental_agreement_html(booking: dict[str, Any], item_title: str) -> str:
     c = _ctx(booking, item_title)
     owner = html.escape(LEGAL_BUSINESS_NAME)
-    delivery_requested = bool(booking.get("delivery_requested"))
-    pickup_from_site_requested = bool(booking.get("pickup_from_site_requested"))
     job_site_raw = str(booking.get("delivery_address") or "").strip()
     job_site = html.escape(job_site_raw)
-    fulfill_lines: list[str] = []
-    if not delivery_requested and not pickup_from_site_requested:
-        fulfill_lines.append("Customer pickup and return")
-    if delivery_requested:
-        fulfill_lines.append("Delivery to job site")
-    if pickup_from_site_requested:
-        fulfill_lines.append("Pickup from job site")
+    delivery_requested = bool(booking.get("delivery_requested"))
+    pickup_from_site_requested = bool(booking.get("pickup_from_site_requested"))
+    fulfill_lines = _fulfillment_lines(booking)
     job_site_line = (
-        f"<p><strong>Job site address:</strong> {job_site}</p>" if job_site_raw and (delivery_requested or pickup_from_site_requested) else ""
+        f"<p><strong>Job site address:</strong> {job_site}</p>"
+        if job_site_raw and (delivery_requested or pickup_from_site_requested)
+        else ""
     )
     fulfill = "<ul>" + "".join(f"<li><strong>{html.escape(x)}</strong></li>" for x in fulfill_lines) + "</ul>" + job_site_line
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Rental Agreement</title></head><body>
@@ -143,38 +309,10 @@ def render_rental_agreement_html(booking: dict[str, Any], item_title: str) -> st
 <p>Renter agrees to operate the equipment lawfully, return it on time and in the same condition subject to ordinary wear, and pay for damage, misuse, late fees, cleaning, missing items, and loss of use as described in this agreement and the Damage &amp; Fee Schedule Addendum.</p>
 <p>Renter acknowledges the equipment is <strong>not released</strong> until payment and deposit requirements are satisfied and the booking is confirmed by {owner}.</p>
 <p>Renter acknowledges the equipment is accepted in good working condition unless otherwise noted at pickup or delivery.</p>
-<h2>Insurance</h2>
-<p>
-Renter represents and agrees that they carry valid automobile insurance that covers the towing and operation of the rented equipment.
-</p>
-<p>
-{owner} does not provide insurance coverage for the rented equipment.
-</p>
-<p>
-Renter is solely responsible for any damage, loss, or liability arising from the use of the equipment, regardless of insurance coverage.
-</p>
-<p>
-Proof of insurance may be requested prior to release of the equipment or at any time during the rental period.
-</p>
-<h2>Prohibited Uses</h2>
-<p>Renter agrees <strong>NOT</strong> to use the equipment for any of the following:</p>
-<ul>
-<li>Overloading the trailer beyond its rated capacity or unevenly loading cargo</li>
-<li>Transporting hazardous, illegal, or prohibited materials</li>
-<li>Hauling materials that can permanently damage the trailer (including but not limited to concrete, asphalt, corrosive chemicals, or hot materials) without prior approval</li>
-<li>Using the trailer in a reckless, unsafe, or unlawful manner</li>
-<li>Operating the trailer while under the influence of alcohol or drugs</li>
-<li>Allowing any unlicensed or unqualified person to tow or operate the trailer</li>
-<li>Using the trailer for commercial purposes not disclosed at the time of booking</li>
-<li>Subleasing, lending, or transferring the trailer to any third party</li>
-<li>Modifying, altering, or tampering with the trailer or its components</li>
-<li>Operating the trailer outside the intended use (including off-road misuse, stunt use, or racing)</li>
-<li>Failing to properly secure loads, resulting in damage or safety risk</li>
-<li>Continuing to use the trailer after noticing mechanical issues or damage</li>
-</ul>
-<p>
-Violation of any prohibited use may result in additional charges, forfeiture of the security deposit, and renter responsibility for all resulting damage, repair, and loss of use.
-</p>
+{_insurance_section_html(owner)}
+{_indemnification_section_html(owner)}
+{_unattended_trailer_section_html()}
+{_prohibited_uses_section_html()}
 <p><strong>Contact:</strong> {c["customer_email"]} · {c["customer_phone"]}<br/>{c["customer_address"]}</p>
 <p><strong>Company (if any):</strong> {c["company_name"]}</p>
 </body></html>"""

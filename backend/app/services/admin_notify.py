@@ -12,6 +12,7 @@ from app.branding import LEGAL_BUSINESS_NAME
 from app.config import Settings
 from app.schemas import BookingRequestStatus
 from app.services.booking_confirmation import apply_booking_confirmation
+from app.services.contract_render import is_customer_pickup_fulfillment
 from app.services.booking_events import log_booking_event
 from app.services.pickup_instructions_email import PICKUP_INSTRUCTIONS_EMAIL_EVENT
 from app.services.quote_email import NO_TRACK_A_ATTR, try_send_email
@@ -101,6 +102,8 @@ def booking_row_ready_for_confirm(row: dict) -> bool:
     if dep_need and not row.get("deposit_secured_at"):
         return False
     if not row.get("agreement_signed_at"):
+        return False
+    if is_customer_pickup_fulfillment(row) and not (row.get("insurance_card_path") or "").strip():
         return False
     return True
 

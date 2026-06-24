@@ -46,6 +46,8 @@ assets/test-fixtures/
 # Private business documents (local only)
 assets/BFamEIN.pdf
 assets/LLCRecipt.pdf
+assets/InlandAndGLreceipts.pdf
+assets/WhatISignedWithTwinLakes.pdf
 
 # OS / editor
 .DS_Store

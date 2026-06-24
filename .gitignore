@@ -43,6 +43,10 @@ backend/data/item-images/
 # Generated / local test assets (e.g. sample license images for dev)
 assets/test-fixtures/
 
+# Private business documents (local only)
+assets/BFamEIN.pdf
+assets/LLCRecipt.pdf
+
 # OS / editor
 .DS_Store
 Thumbs.db

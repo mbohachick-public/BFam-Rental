@@ -34,3 +34,29 @@ def create_booking_setup_intent(settings: Settings, *, booking_id: str, customer
         "id": intent.id,
         "client_secret": intent.client_secret,
     }
+
+
+def assert_payment_method_for_booking(
+    settings: Settings,
+    *,
+    booking_id: str,
+    setup_intent_id: str | None,
+    payment_method_id: str,
+) -> None:
+    """Reject payment methods not produced by this booking's SetupIntent."""
+    sid = (setup_intent_id or "").strip()
+    if not sid:
+        raise ValueError("Save your card on the completion page before submitting.")
+    key = (settings.stripe_secret_key or "").strip()
+    if not key:
+        raise ValueError("Stripe is not configured on the API.")
+    stripe.api_key = key
+    intent = stripe.SetupIntent.retrieve(sid)
+    meta_bid = (intent.metadata or {}).get("booking_id")
+    if str(meta_bid) != str(booking_id):
+        raise ValueError("Payment method is not linked to this booking.")
+    if intent.status != "succeeded":
+        raise ValueError("Card setup is incomplete. Save your payment method again.")
+    intent_pm = intent.payment_method
+    if not isinstance(intent_pm, str) or intent_pm != payment_method_id:
+        raise ValueError("Payment method does not match the card saved for this booking.")

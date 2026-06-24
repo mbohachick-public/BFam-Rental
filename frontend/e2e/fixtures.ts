@@ -50,6 +50,11 @@ export async function adminApi(request: APIRequestContext) {
     return res.json()
   }
 
+  async function deleteItem(itemId: string) {
+    const res = await request.delete(`${API_BASE}/admin/items/${itemId}`, { headers })
+    expect(res.status(), `deleteItem failed: ${res.status()}`).toBe(204)
+  }
+
   async function setDayStatuses(
     itemId: string,
     days: Array<{ day: string; status: string }>,
@@ -130,6 +135,7 @@ export async function adminApi(request: APIRequestContext) {
     headers,
     createItem,
     patchItem,
+    deleteItem,
     setDayStatuses,
     listItems,
     listBookings,

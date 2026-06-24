@@ -17,7 +17,7 @@ def test_public_payment_status_404(client):
     assert r.status_code == 404
 
 
-def test_public_payment_status_ok(client, db_store, seed_item):
+def test_public_payment_status_requires_auth(client, db_store, seed_item):
     item = seed_item()
     bid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     db_store["booking_requests"].append(
@@ -34,6 +34,33 @@ def test_public_payment_status_ok(client, db_store, seed_item):
         }
     )
     r = client.get(f"/booking-requests/{bid}/payment-status")
+    assert r.status_code == 403
+
+
+def test_public_payment_status_ok_with_step2_token(client, db_store, seed_item):
+    from app.services.booking_access import issue_step2_token_fields
+
+    item = seed_item()
+    bid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    fields, raw = issue_step2_token_fields()
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item["id"],
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-02",
+            "status": "approved_pending_payment",
+            "rental_paid_at": None,
+            "rental_payment_status": "unpaid",
+            "deposit_amount": 50.0,
+            "deposit_secured_at": None,
+            **fields,
+        }
+    )
+    r = client.get(
+        f"/booking-requests/{bid}/payment-status",
+        headers={"X-Booking-Step-Token": raw},
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["booking_id"] == bid

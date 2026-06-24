@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { apiGetPublic } from '../api/client'
+import { apiGetPaymentStatus } from '../api/client'
 import { LEGAL_BUSINESS_NAME } from '../branding'
 import type { BookingPaymentStatusPublic } from '../types'
 
@@ -62,9 +62,7 @@ export function PaymentSuccessPage() {
   useEffect(() => {
     if (!bookingIdOk) return
     let cancelled = false
-    apiGetPublic<BookingPaymentStatusPublic>(
-      `/booking-requests/${encodeURIComponent(bookingId)}/payment-status`,
-    )
+    apiGetPaymentStatus<BookingPaymentStatusPublic>(bookingId, signToken)
       .then((d) => {
         if (!cancelled) setData(d)
       })
@@ -124,10 +122,7 @@ export function PaymentSuccessPage() {
 
       <section className="card card-pad section-block" style={{ marginTop: '1rem' }}>
         <p style={{ margin: 0, fontWeight: 700 }}>
-          We’ve sent your pickup or delivery instructions to:{' '}
-          <span style={{ fontWeight: 800 }}>
-            {data.customer_email?.trim() ? data.customer_email.trim() : 'your email address'}
-          </span>
+          We’ve sent your pickup or delivery instructions to your email address on file.
         </p>
       </section>
 

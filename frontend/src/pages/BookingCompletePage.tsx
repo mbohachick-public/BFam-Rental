@@ -1,11 +1,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   apiGet,
   apiPost,
+  readStep2Token,
+  setBookingStep2TokenGetter,
   uploadBookingFileToSignedUrl,
+  writeStep2Token,
 } from '../api/client'
 import { useCustomerSession } from '../context/CustomerSessionContext'
 import type {
@@ -73,6 +76,7 @@ StripePaymentInner.displayName = 'StripePaymentInner'
 
 export function BookingCompletePage() {
   const { id: bookingId } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const customer = useCustomerSession()
   const [summary, setSummary] = useState<BookingCompletionSummaryOut | null>(null)
@@ -101,6 +105,21 @@ export function BookingCompletePage() {
 
   const stripePk = stripeSetup?.publishable_key ?? ''
   const stripePromise = useMemo(() => (stripePk ? loadStripe(stripePk) : null), [stripePk])
+
+  useEffect(() => {
+    if (!bookingId) return
+    const fromUrl = searchParams.get('t')?.trim()
+    if (fromUrl) {
+      writeStep2Token(bookingId, fromUrl)
+      navigate(`/booking/${encodeURIComponent(bookingId)}/complete`, { replace: true })
+    }
+  }, [bookingId, navigate, searchParams])
+
+  useEffect(() => {
+    if (!bookingId) return
+    setBookingStep2TokenGetter(() => readStep2Token(bookingId))
+    return () => setBookingStep2TokenGetter(null)
+  }, [bookingId])
 
   useEffect(() => {
     if (!bookingId) return

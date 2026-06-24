@@ -3,7 +3,13 @@
  * Never set in production builds (ignored when `import.meta.env.PROD`).
  */
 export function e2eDevAuth0AccessToken(): string | null {
-  if (import.meta.env.PROD) return null
+  if (import.meta.env.PROD) {
+    const t = String(import.meta.env.VITE_E2E_AUTH0_ACCESS_TOKEN ?? '').trim()
+    if (t) {
+      console.error('VITE_E2E_AUTH0_ACCESS_TOKEN must not be set in production builds.')
+    }
+    return null
+  }
   const t = String(import.meta.env.VITE_E2E_AUTH0_ACCESS_TOKEN ?? '').trim()
   return t || null
 }

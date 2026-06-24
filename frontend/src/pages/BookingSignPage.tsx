@@ -31,6 +31,17 @@ export function BookingSignPage() {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
+    const meta = document.createElement('meta')
+    meta.httpEquiv = 'Content-Security-Policy'
+    meta.content =
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'"
+    document.head.appendChild(meta)
+    return () => {
+      meta.remove()
+    }
+  }, [])
+
+  useEffect(() => {
     if (!token) {
       setError('Missing signing link.')
       setLoading(false)

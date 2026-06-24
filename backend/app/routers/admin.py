@@ -41,6 +41,7 @@ from app.services.booking_storage import admin_booking_file_response, admin_exec
 from app.services.dates import iter_days_inclusive
 from app.services.item_availability import day_availability_range
 from app.services.item_availability_seed import seed_day_status_for_new_item
+from app.services.item_delete import delete_item_and_related_data
 from app.services.item_images_storage import (
     MAX_ITEM_IMAGES,
     save_item_image_bytes,
@@ -423,6 +424,16 @@ def admin_update_item(
                 {"item_id": item_id, "url": url, "sort_order": idx}
             ).execute()
     return _load_item_detail(client, item_id)
+
+
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_item(
+    item_id: str, client: Client = Depends(get_supabase_client)
+) -> None:
+    """Permanently remove an item, related bookings, calendar rows, images, and storage files."""
+    _load_item_detail(client, item_id)
+    settings = get_settings()
+    delete_item_and_related_data(settings, client, item_id)
 
 
 @router.post("/items/{item_id}/images", response_model=ItemImageOut)

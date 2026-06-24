@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { adminGet, adminPost } from '../../api/client'
+import { adminDeleteVoid, adminGet, adminPatch, adminPost } from '../../api/client'
 import { useAdminApiReady } from '../../hooks/useAdminApiReady'
 import type { E2eCleanupResult, ItemSummary } from '../../types'
 
@@ -17,6 +17,7 @@ export function AdminItemsPage() {
   const [error, setError] = useState<string | null>(null)
   const [cleanupMsg, setCleanupMsg] = useState<string | null>(null)
   const [cleanupBusy, setCleanupBusy] = useState(false)
+  const [rowBusyId, setRowBusyId] = useState<string | null>(null)
 
   const loadItems = useCallback(() => {
     if (!adminApiReady) return
@@ -28,6 +29,44 @@ export function AdminItemsPage() {
   useEffect(() => {
     loadItems()
   }, [loadItems])
+
+  async function toggleVisibility(it: ItemSummary) {
+    if (!adminApiReady) return
+    const hide = it.active !== false
+    const msg = hide
+      ? `Hide "${it.title}" from the public catalog? Customers will no longer see it.`
+      : `Show "${it.title}" in the public catalog again?`
+    if (!window.confirm(msg)) return
+    setRowBusyId(it.id)
+    setError(null)
+    try {
+      await adminPatch<ItemSummary>(`/admin/items/${it.id}`, { active: !hide })
+      loadItems()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Update failed')
+    } finally {
+      setRowBusyId(null)
+    }
+  }
+
+  async function deleteItem(it: ItemSummary) {
+    if (!adminApiReady) return
+    const ok = window.confirm(
+      `Permanently delete "${it.title}"? This removes the item, its calendar, images, ` +
+        'and all related booking records. This cannot be undone.',
+    )
+    if (!ok) return
+    setRowBusyId(it.id)
+    setError(null)
+    try {
+      await adminDeleteVoid(`/admin/items/${it.id}`)
+      loadItems()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setRowBusyId(null)
+    }
+  }
 
   async function runE2eCleanup() {
     if (!adminApiReady) return
@@ -86,6 +125,22 @@ export function AdminItemsPage() {
               <Link to={`/admin/items/${it.id}/availability`} className="btn btn-secondary btn-sm">
                 Calendar
               </Link>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!adminApiReady || rowBusyId === it.id}
+                onClick={() => void toggleVisibility(it)}
+              >
+                {rowBusyId === it.id ? 'Saving…' : it.active === false ? 'Show' : 'Hide'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm admin-btn-danger"
+                disabled={!adminApiReady || rowBusyId === it.id}
+                onClick={() => void deleteItem(it)}
+              >
+                Delete
+              </button>
             </div>
           </li>
         ))}

@@ -16,7 +16,8 @@ As an admin of the system I should be able to add the attributes for the items.
 As an admin of the system I should be able to accept a proposed booking.
 As an admin of the system I should be able to decline a proposed booking by entering a reason, have the customer notified by email with the item and requested rental period, and have those dates marked open for booking again.
 As an admin of the system I should be able update the status of each item.
-As an admin of the system I should be able to hide an item from the public catalog while still seeing it in the admin item list, with inactive items clearly highlighted.
+As an admin of the system I should be able to hide an item from the public catalog while still seeing it in the admin item list, with inactive items clearly highlighted. From the admin items list I should be able to hide or show an item with one action (without opening the edit form).
+As an admin of the system I should be able to permanently delete an item from the admin items list, removing related bookings, calendar rows, images, and storage files after a confirmation prompt.
 
 As a user I should be able to select the Category when filtering from all the distinct categories of existing items.
 As a user I should be able to set minimum and maximum $ / day using a single range control with a slider on each end (whole dollars).

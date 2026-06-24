@@ -6,8 +6,10 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from supabase import Client
+
+from app.rate_limit import limiter
 
 from app.deps import get_supabase_client, optional_customer_jwt_claims
 from app.schemas import (
@@ -110,7 +112,9 @@ def _parse_uuid(request_id: str) -> str:
 
 
 @router.post("/assistant", response_model=TrailerMatchAssistantOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 def trailer_match_assistant(
+    request: Request,
     body: TrailerMatchAssistantIn,
     customer: Annotated[dict | None, Depends(optional_customer_jwt_claims)] = None,
     client: Client = Depends(get_supabase_client),
@@ -233,7 +237,9 @@ def trailer_match_assistant(
     response_model=TrailerMatchDeliveryQuoteClickOut,
     status_code=status.HTTP_200_OK,
 )
+@limiter.limit("20/minute")
 def trailer_match_delivery_quote_click(
+    request: Request,
     request_id: str,
     client: Client = Depends(get_supabase_client),
 ) -> TrailerMatchDeliveryQuoteClickOut:

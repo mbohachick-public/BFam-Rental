@@ -195,6 +195,32 @@ def test_stripe_webhook_deposit_unpaid_needs_pi_retrieve_failure_is_safe(
 # ---------------------------------------------------------------------------
 
 
+def _seed_step2_booking(db_store, seed_item, *, sub: str | None = None) -> tuple[str, str]:
+    from app.services.booking_access import issue_step2_token_fields
+
+    item = seed_item(towable=False)
+    bid = str(uuid.uuid4())
+    fields, raw = issue_step2_token_fields()
+    row = {
+        "id": bid,
+        "item_id": item["id"],
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-02",
+        "status": "requested",
+        "customer_email": "owner@test.com",
+        "discounted_subtotal": 50.0,
+        "deposit_amount": 0.0,
+        "rental_total_with_tax": 55.0,
+        "delivery_requested": False,
+        "pickup_from_site_requested": False,
+        **fields,
+    }
+    if sub:
+        row["customer_auth0_sub"] = sub
+    db_store["booking_requests"].append(row)
+    return bid, raw
+
+
 def test_public_payment_status_suspicious_id_is_not_sql_error(client):
     from urllib.parse import quote
 
@@ -202,6 +228,29 @@ def test_public_payment_status_suspicious_id_is_not_sql_error(client):
     r = client.get(f"/booking-requests/{rid}/payment-status")
     # Literal id string has no row → 404, not 5xx
     assert r.status_code == 404
+
+
+def test_public_payment_status_unauthenticated_existing_booking_403(client, db_store, seed_item):
+    bid, _ = _seed_step2_booking(db_store, seed_item)
+    r = client.get(f"/booking-requests/{bid}/payment-status")
+    assert r.status_code == 403
+
+
+def test_step2_idor_auth_user_unbound_booking_rejected(client, fake_settings, db_store, seed_item, monkeypatch):
+    """Authenticated user cannot access Step 2 for a booking with no customer_auth0_sub without email token."""
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
+
+    def _claims(*_a, **_k):
+        return {"sub": "auth0|attacker"}
+
+    monkeypatch.setattr("app.deps.verify_auth0_access_token", _claims)
+    bid, _ = _seed_step2_booking(db_store, seed_item, sub=None)
+    r = client.get(
+        f"/booking-requests/{bid}/completion-summary",
+        headers={"Authorization": "Bearer fake"},
+    )
+    assert r.status_code == 403
 
 
 def test_public_payment_status_unicode_in_path_404_not_500(client):
@@ -218,6 +267,89 @@ def test_booking_sign_very_long_token_does_not_crash_404(client, monkeypatch):
     if r.status_code == 500:
         pytest.fail("very long path token caused server error; expected 4xx")
     assert r.status_code in (404, 410)
+
+
+# ---------------------------------------------------------------------------
+# Step 2 IDOR: email token + Auth0 sub ownership
+# ---------------------------------------------------------------------------
+
+
+def test_step2_completion_summary_rejects_missing_token(client, db_store, seed_item):
+    bid, _ = _seed_step2_booking(db_store, seed_item)
+    r = client.get(f"/booking-requests/{bid}/completion-summary")
+    assert r.status_code == 403
+
+
+def test_step2_completion_summary_accepts_email_token(client, db_store, seed_item):
+    bid, raw = _seed_step2_booking(db_store, seed_item)
+    r = client.get(
+        f"/booking-requests/{bid}/completion-summary",
+        headers={"X-Booking-Step-Token": raw},
+    )
+    assert r.status_code == 200
+    assert r.json()["booking_id"] == bid
+
+
+def test_step2_abandon_rejects_wrong_token(client, db_store, seed_item):
+    bid, _ = _seed_step2_booking(db_store, seed_item)
+    r = client.delete(
+        f"/booking-requests/{bid}/abandon",
+        headers={"X-Booking-Step-Token": "not-the-real-token"},
+    )
+    assert r.status_code == 403
+
+
+def test_step2_idor_auth0_sub_mismatch(client, fake_settings, db_store, seed_item, monkeypatch):
+    fake_settings.auth0_domain = "tenant.auth0.com"
+    fake_settings.auth0_audience = "https://api.test/"
+
+    def _claims_a(*_a, **_k):
+        return {"sub": "auth0|user-a"}
+
+    monkeypatch.setattr("app.deps.verify_auth0_access_token", _claims_a)
+    bid, raw = _seed_step2_booking(db_store, seed_item, sub="auth0|user-b")
+    r = client.get(
+        f"/booking-requests/{bid}/completion-summary",
+        headers={"Authorization": "Bearer fake", "X-Booking-Step-Token": raw},
+    )
+    assert r.status_code == 403
+
+
+def test_stripe_pm_rejected_when_setup_intent_mismatch(
+    client, fake_settings, db_store, seed_item, monkeypatch
+):
+    fake_settings.stripe_secret_key = "sk_test"
+    fake_settings.stripe_publishable_key = "pk_test"
+    bid, raw = _seed_step2_booking(db_store, seed_item)
+    row = next(r for r in db_store["booking_requests"] if r["id"] == bid)
+    row["stripe_setup_intent_id"] = "seti_booking_a"
+
+    class _Intent:
+        status = "succeeded"
+        payment_method = "pm_victim"
+        metadata = {"booking_id": bid}
+
+    def _retrieve(sid):
+        assert sid == "seti_booking_a"
+        return _Intent()
+
+    monkeypatch.setattr("app.services.stripe_customer_setup.stripe.SetupIntent.retrieve", _retrieve)
+
+    r = client.post(
+        f"/booking-requests/{bid}/verification",
+        headers={"X-Booking-Step-Token": raw},
+        json={
+            "drivers_license_path": f"{bid}/drivers_license.jpg",
+            "customer_address": "1 Main St, Springfield, MO 65802",
+            "vehicle_tow_capable_ack": False,
+            "request_approval_acknowledged": True,
+            "agreement_sign_intent_acknowledged": True,
+            "damage_waiver_selected": False,
+            "stripe_payment_method_id": "pm_attacker",
+        },
+    )
+    assert r.status_code == 400
+    assert "payment method" in r.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

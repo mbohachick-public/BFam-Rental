@@ -4,13 +4,20 @@ import logging
 import uuid
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import ValidationError
 from supabase import Client
 
 from app.config import get_settings
 from app.db import get_supabase
-from app.deps import customer_jwt_claims, get_supabase_client, require_customer_jwt
+from app.deps import (
+    customer_jwt_claims,
+    get_supabase_client,
+    optional_customer_jwt_claims,
+    require_customer_jwt,
+    sign_token_optional,
+    step2_token_optional,
+)
 from app.schemas import (
     BookingCompleteBody,
     BookingCompletionPresignBody,
@@ -35,7 +42,16 @@ from app.schemas import (
     DayStatus,
     DepositAuthorizationStatus,
 )
-from app.services.booking import compute_rental_amounts, validate_booking_dates
+from app.rate_limit import limiter
+from app.services.booking_access import (
+    assert_payment_status_access,
+    assert_step2_access,
+    complete_path_with_token,
+    complete_url_with_token,
+    issue_step2_token_fields,
+    maybe_bind_customer_sub,
+)
+from app.services.contract_signing import load_token_row_by_raw
 from app.services.delivery_pricing import compute_logistics_charges
 from app.services.sales_tax import (
     compute_sales_tax_amount,
@@ -47,6 +63,7 @@ from app.services.booking_documents import (
     ext_for_content_type,
     normalize_booking_document_upload_content_type,
     normalize_booking_image_content_type,
+    sniff_booking_document_content_type,
     validate_image_upload,
 )
 from app.services.booking_storage import (
@@ -67,11 +84,57 @@ from app.services.quote_email import (
     send_booking_pending_review_notice_email,
     send_quote_email,
 )
-from app.services.stripe_customer_setup import create_booking_setup_intent, stripe_payment_collection_enabled
+from app.services.booking import compute_rental_amounts, validate_booking_dates
+from app.services.stripe_customer_setup import (
+    assert_payment_method_for_booking,
+    create_booking_setup_intent,
+    stripe_payment_collection_enabled,
+)
 
 router = APIRouter(prefix="/booking-requests", tags=["booking-requests"])
 
 log = logging.getLogger(__name__)
+
+
+def _attach_step2_token(insert_row: dict, settings) -> str:
+    fields, raw = issue_step2_token_fields(settings)
+    insert_row.update(fields)
+    return raw
+
+
+def _step2_guard(
+    client: Client,
+    booking_id: str,
+    booking_row: dict,
+    customer: dict | None,
+    step_token: str | None,
+    *,
+    bind: bool = True,
+) -> None:
+    assert_step2_access(booking_row, customer_claims=customer, step_token=step_token)
+    if bind:
+        maybe_bind_customer_sub(client, booking_id, booking_row, customer)
+
+
+def _sign_token_valid_for_booking(client: Client, booking_id: str, raw_token: str | None) -> bool:
+    raw = (raw_token or "").strip()
+    if not raw:
+        return False
+    tok = load_token_row_by_raw(client, raw)
+    if not tok:
+        return False
+    if str(tok.get("booking_id") or "") != str(booking_id):
+        return False
+    exp_raw = tok.get("expires_at")
+    if not exp_raw:
+        return True
+    try:
+        exp = datetime.fromisoformat(str(exp_raw).replace("Z", "+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) <= exp
+    except Exception:
+        return False
 
 
 def _parse_trailer_match_request_id(raw: str | None) -> str | None:
@@ -336,11 +399,11 @@ def _validated_booking_insert_row(
     delivery_requested: bool = False,
     pickup_from_site_requested: bool = False,
     logistics_address: str | None = None,
-) -> tuple[dict, str, bool, int, Decimal, Decimal, Decimal, Decimal, Decimal, str, Decimal]:
+) -> tuple[dict, str, bool, int, Decimal, Decimal, Decimal, Decimal, Decimal, str, Decimal, str]:
     """
     Validate item/dates/contact/tax and build the insert dict (no document paths).
     Returns insert_row, item_title, towable, num_days, disc_sub, tax_rate, tax_amt,
-    rental_w_tax, tax_src, dep.
+    rental_w_tax, tax_src, dep, step2_raw.
     """
     clean_notes = (notes or "").strip() or None
     item_res = (
@@ -448,6 +511,7 @@ def _validated_booking_insert_row(
         insert_row["customer_auth0_sub"] = auth_sub
 
     insert_row.update(_multipart_workflow_defaults())
+    step2_raw = _attach_step2_token(insert_row, settings)
 
     return (
         insert_row,
@@ -460,6 +524,7 @@ def _validated_booking_insert_row(
         rental_w_tax,
         tax_src,
         dep,
+        step2_raw,
     )
 
 
@@ -468,7 +533,7 @@ def _intake_booking_insert_row(
     settings,
     customer: dict | None,
     body: BookingIntakeCreate,
-) -> tuple[dict, str]:
+) -> tuple[dict, str, str]:
     """Step 1: pricing without billing address — tax postal optional; persist rental_subtotal_snapshot."""
     clean_notes = (body.notes or "").strip() or None
     item_res = (
@@ -584,8 +649,9 @@ def _intake_booking_insert_row(
         insert_row["customer_auth0_sub"] = auth_sub
 
     insert_row.update(_multipart_workflow_defaults())
+    step2_raw = _attach_step2_token(insert_row, settings)
 
-    return insert_row, item_title
+    return insert_row, item_title, step2_raw
 
 
 def _damage_waiver_daily(settings) -> Decimal:
@@ -646,7 +712,9 @@ def _booking_store_error_detail(settings) -> str:
 
 
 @router.post("/intake", response_model=BookingIntakeOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 def create_booking_intake(
+    request: Request,
     body: BookingIntakeCreate,
     background_tasks: BackgroundTasks,
     customer: dict | None = Depends(customer_jwt_claims),
@@ -654,7 +722,7 @@ def create_booking_intake(
 ) -> BookingIntakeOut:
     """Step 1: lightweight request without documents; customer continues on /booking/:id/complete."""
     settings = get_settings()
-    insert_row, item_title = _intake_booking_insert_row(client, settings, customer, body)
+    insert_row, item_title, step2_raw = _intake_booking_insert_row(client, settings, customer, body)
     try:
         insert_res = client.table("booking_requests").insert(insert_row).execute()
     except Exception as exc:
@@ -669,8 +737,7 @@ def create_booking_intake(
     tmid = _parse_trailer_match_request_id(body.trailer_match_request_id)
     if tmid:
         _mark_trailer_match_converted(client, tmid, bid)
-    base_fe = (settings.frontend_public_url or "").strip().rstrip("/")
-    complete_url = f"{base_fe}/booking/{bid}/complete"
+    complete_url = complete_url_with_token(settings, bid, step2_raw)
     em = str(body.customer_email).strip()
     if em:
         num_days = len(iter_days_inclusive(body.start_date, body.end_date))
@@ -694,20 +761,26 @@ def create_booking_intake(
         )
     return BookingIntakeOut(
         booking_id=bid,
-        complete_path=f"/booking/{bid}/complete",
+        complete_path=complete_path_with_token(bid, step2_raw),
         status=BookingRequestStatus(row.get("status") or BookingRequestStatus.requested.value),
     )
 
 
 @router.get("/{booking_id}/completion-summary", response_model=BookingCompletionSummaryOut)
+@limiter.limit("60/minute")
 def get_booking_completion_summary(
-    booking_id: str, client: Client = Depends(get_supabase_client)
+    request: Request,
+    booking_id: str,
+    step_token: str | None = Depends(step2_token_optional),
+    customer: dict | None = Depends(optional_customer_jwt_claims),
+    client: Client = Depends(get_supabase_client),
 ) -> BookingCompletionSummaryOut:
     res = client.table("booking_requests").select("*").eq("id", booking_id).limit(1).execute()
     rows = res.data or []
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
+    _step2_guard(client, booking_id, row, customer, step_token, bind=False)
     st = str(row.get("status") or "")
     if st not in (BookingRequestStatus.requested.value, BookingRequestStatus.pending_approval.value):
         raise HTTPException(
@@ -764,10 +837,13 @@ def get_booking_completion_summary(
 
 
 @router.post("/{booking_id}/completion-uploads/presign", response_model=BookingCompletionPresignOut)
+@limiter.limit("30/minute")
 def completion_upload_presign(
+    request: Request,
     booking_id: str,
     body: BookingCompletionPresignBody,
-    _customer: dict | None = Depends(customer_jwt_claims),
+    step_token: str | None = Depends(step2_token_optional),
+    customer: dict | None = Depends(optional_customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingCompletionPresignOut:
     settings = get_settings()
@@ -778,7 +854,7 @@ def completion_upload_presign(
         )
     res = (
         client.table("booking_requests")
-        .select("id,status,drivers_license_path,license_plate_path")
+        .select("id,status,drivers_license_path,license_plate_path,customer_auth0_sub,step2_token_hash,step2_token_expires_at")
         .eq("id", booking_id)
         .limit(1)
         .execute()
@@ -787,6 +863,7 @@ def completion_upload_presign(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     brow = rows[0]
+    _step2_guard(client, booking_id, brow, customer, step_token)
     if str(brow.get("status") or "") != BookingRequestStatus.requested.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -834,9 +911,12 @@ def completion_upload_presign(
 
 
 @router.post("/{booking_id}/stripe-setup-intent", response_model=BookingStripeSetupIntentOut)
+@limiter.limit("30/minute")
 def booking_stripe_setup_intent(
+    request: Request,
     booking_id: str,
-    _customer: dict | None = Depends(customer_jwt_claims),
+    step_token: str | None = Depends(step2_token_optional),
+    customer: dict | None = Depends(optional_customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingStripeSetupIntentOut:
     settings = get_settings()
@@ -856,6 +936,7 @@ def booking_stripe_setup_intent(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
+    _step2_guard(client, booking_id, row, customer, step_token)
     if str(row.get("status") or "") != BookingRequestStatus.requested.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -867,17 +948,23 @@ def booking_stripe_setup_intent(
             booking_id=booking_id,
             customer_email=str(row.get("customer_email") or "").strip() or None,
         )
+        client.table("booking_requests").update(
+            {"stripe_setup_intent_id": intent["id"]}
+        ).eq("id", booking_id).execute()
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     return BookingStripeSetupIntentOut(client_secret=intent["client_secret"], publishable_key=pk)
 
 
 @router.post("/{booking_id}/verification", response_model=BookingRequestOut)
+@limiter.limit("20/minute")
 def submit_booking_verification(
+    request: Request,
     booking_id: str,
     body: BookingVerificationSubmit,
     background_tasks: BackgroundTasks,
-    _customer: dict | None = Depends(customer_jwt_claims),
+    step_token: str | None = Depends(step2_token_optional),
+    customer: dict | None = Depends(optional_customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingRequestOut:
     settings = get_settings()
@@ -887,6 +974,7 @@ def submit_booking_verification(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
+    _step2_guard(client, booking_id, row, customer, step_token)
     if str(row.get("status") or "") != BookingRequestStatus.requested.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -903,6 +991,15 @@ def submit_booking_verification(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Stripe is enabled — save a payment method before submitting.",
             )
+        try:
+            assert_payment_method_for_booking(
+                settings,
+                booking_id=booking_id,
+                setup_intent_id=str(row.get("stripe_setup_intent_id") or "").strip() or None,
+                payment_method_id=pm,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     addr = body.customer_address.strip()
     needs_job_site = bool(row.get("delivery_requested")) or bool(row.get("pickup_from_site_requested"))
@@ -1191,12 +1288,21 @@ def get_my_contact_profile(
 
 
 @router.get("/{booking_id}/payment-status", response_model=BookingPaymentStatusPublic)
-def public_booking_payment_status(booking_id: str, client: Client = Depends(get_supabase_client)):
-    """Post-Stripe thank-you page: minimal booking state (no auth; UUID is the secret)."""
+@limiter.limit("30/minute")
+def public_booking_payment_status(
+    request: Request,
+    booking_id: str,
+    client: Client = Depends(get_supabase_client),
+    customer: dict | None = Depends(optional_customer_jwt_claims),
+    step_token: str | None = Depends(step2_token_optional),
+    sign_token: str | None = Depends(sign_token_optional),
+):
+    """Post-Stripe thank-you page: requires Step 2 token, signing token, or customer JWT."""
     res = (
         client.table("booking_requests")
         .select(
-            "id,status,rental_paid_at,rental_payment_status,item_id,deposit_secured_at,deposit_amount,customer_email"
+            "id,status,rental_paid_at,rental_payment_status,item_id,deposit_secured_at,deposit_amount,"
+            "customer_auth0_sub,step2_token_hash,step2_token_expires_at"
         )
         .eq("id", booking_id)
         .limit(1)
@@ -1206,6 +1312,12 @@ def public_booking_payment_status(booking_id: str, client: Client = Depends(get_
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
+    assert_payment_status_access(
+        row,
+        customer_claims=customer,
+        step_token=step_token,
+        sign_token_valid=_sign_token_valid_for_booking(client, booking_id, sign_token),
+    )
     item_res = (
         client.table("items")
         .select("title")
@@ -1230,14 +1342,15 @@ def public_booking_payment_status(booking_id: str, client: Client = Depends(get_
         rental_paid=paid,
         rental_payment_status=str(rps).strip() if rps is not None else None,
         item_title=item_title,
-        customer_email=str(row.get("customer_email") or "").strip() or None,
         deposit_secured=dep_secured,
         requires_deposit=requires_deposit,
     )
 
 
 @router.post("/presign", response_model=BookingPresignResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 def presign_booking_uploads(
+    request: Request,
     body: BookingPresignRequest,
     customer: dict | None = Depends(customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
@@ -1289,7 +1402,7 @@ def presign_booking_uploads(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
-    insert_row, _item_title, towable, _num_days, _disc_sub, _tax_rate, _tax_amt, _rental_w_tax, _tax_src, _dep = (
+    insert_row, _item_title, towable, _num_days, _disc_sub, _tax_rate, _tax_amt, _rental_w_tax, _tax_src, _dep, step2_raw = (
         _validated_booking_insert_row(
             client,
             settings,
@@ -1363,14 +1476,19 @@ def presign_booking_uploads(
         license_plate=lp_slot_out,
         insurance_card=ins_slot_out,
         expires_in=BOOKING_UPLOAD_PRESIGN_EXPIRES_SEC,
+        step2_token=step2_raw,
+        complete_path=complete_path_with_token(bid, step2_raw),
     )
 
 
 @router.post("/{booking_id}/complete", response_model=BookingRequestOut)
+@limiter.limit("30/minute")
 def complete_booking_uploads(
+    request: Request,
     booking_id: str,
     body: BookingCompleteBody,
-    _customer: dict | None = Depends(customer_jwt_claims),
+    step_token: str | None = Depends(step2_token_optional),
+    customer: dict | None = Depends(optional_customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingRequestOut:
     """After direct-to-Supabase uploads, verify objects and finalize the booking row."""
@@ -1391,6 +1509,7 @@ def complete_booking_uploads(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
+    _step2_guard(client, booking_id, row, customer, step_token)
     st = row.get("status")
     if st not in (BookingRequestStatus.pending.value, BookingRequestStatus.requested.value):
         raise HTTPException(
@@ -1458,15 +1577,22 @@ def complete_booking_uploads(
 
 
 @router.delete("/{booking_id}/abandon", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
 def abandon_booking_upload(
+    request: Request,
     booking_id: str,
+    step_token: str | None = Depends(step2_token_optional),
+    customer: dict | None = Depends(optional_customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> None:
     """Drop a pending booking that never completed uploads (cleanup)."""
     settings = get_settings()
     res = (
         client.table("booking_requests")
-        .select("id,status,item_id,start_date,end_date,drivers_license_path,license_plate_path")
+        .select(
+            "id,status,item_id,start_date,end_date,drivers_license_path,license_plate_path,"
+            "customer_auth0_sub,step2_token_hash,step2_token_expires_at"
+        )
         .eq("id", booking_id)
         .limit(1)
         .execute()
@@ -1475,6 +1601,7 @@ def abandon_booking_upload(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     row = rows[0]
+    _step2_guard(client, booking_id, row, customer, step_token, bind=False)
     st = row.get("status")
     if st not in (BookingRequestStatus.pending.value, BookingRequestStatus.requested.value):
         raise HTTPException(
@@ -1617,8 +1744,9 @@ def create_booking_request(
 
     try:
         dl_raw, dl_ct = _read_upload(drivers_license)
+        dl_sniffed = sniff_booking_document_content_type(f"{bid}/drivers_license", dl_raw)
         try:
-            dl_type = validate_image_upload(dl_ct, len(dl_raw), "Driver's license")
+            dl_type = validate_image_upload(dl_sniffed or dl_ct, len(dl_raw), "Driver's license")
         except ValueError as e:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
         dl_ext = ext_for_content_type(dl_type)
@@ -1628,8 +1756,9 @@ def create_booking_request(
         path_lp_val = None
         if towable and license_plate is not None:
             lp_raw, lp_ct = _read_upload(license_plate)
+            lp_sniffed = sniff_booking_document_content_type(f"{bid}/license_plate", lp_raw)
             try:
-                lp_type = validate_image_upload(lp_ct, len(lp_raw), "License plate")
+                lp_type = validate_image_upload(lp_sniffed or lp_ct, len(lp_raw), "License plate")
             except ValueError as e:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
             lp_ext = ext_for_content_type(lp_type)
@@ -1639,8 +1768,9 @@ def create_booking_request(
         path_ins_val = None
         if insurance_card is not None and insurance_card.filename:
             ins_raw, ins_ct = _read_upload(insurance_card)
+            ins_sniffed = sniff_booking_document_content_type(f"{bid}/insurance_card", ins_raw)
             try:
-                ins_type = validate_image_upload(ins_ct, len(ins_raw), "Insurance card")
+                ins_type = validate_image_upload(ins_sniffed or ins_ct, len(ins_raw), "Insurance card")
             except ValueError as e:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
             ins_ext = ext_for_content_type(ins_type)

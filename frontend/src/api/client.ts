@@ -4,6 +4,33 @@ export type CustomerTokenOptions = { cacheMode?: 'on' | 'off' | 'cache-only' }
 type CustomerTokenGetter = (opts?: CustomerTokenOptions) => Promise<string | null>
 
 let customerAccessTokenGetter: CustomerTokenGetter | null = null
+let bookingStep2TokenGetter: (() => string | null) | null = null
+
+/** Called from BookingCompletePage; clears on unmount. */
+export function setBookingStep2TokenGetter(fn: (() => string | null) | null) {
+  bookingStep2TokenGetter = fn
+}
+
+function step2ProtectedBookingPath(path: string): boolean {
+  return (
+    path.startsWith('/booking-requests/') &&
+    /\/completion-summary|\/completion-uploads\/presign|\/stripe-setup-intent|\/verification|\/complete|\/abandon/.test(
+      path,
+    )
+  )
+}
+
+async function withStep2Headers(
+  path: string,
+  headers: Record<string, string>,
+): Promise<Record<string, string>> {
+  const out = { ...headers }
+  if (step2ProtectedBookingPath(path)) {
+    const t = bookingStep2TokenGetter?.()
+    if (t) out['X-Booking-Step-Token'] = t
+  }
+  return out
+}
 
 /** Called from Auth0 bridge; clears when Auth0 is off or on unmount. */
 export function setCustomerAccessTokenGetter(fn: CustomerTokenGetter | null) {
@@ -41,7 +68,10 @@ async function fetchBookingRequestsWithAuthRetry(
       : { ...((init.headers as Record<string, string> | undefined) ?? {}) }
 
   const run = async (tokenOpts?: CustomerTokenOptions) => {
-    const headers = await withCustomerAuthHeaders(path, baseHeaders, tokenOpts)
+    const headers = await withStep2Headers(
+      path,
+      await withCustomerAuthHeaders(path, baseHeaders, tokenOpts),
+    )
     return apiFetch(`${baseUrl()}${path}`, { ...init, headers })
   }
 
@@ -178,6 +208,43 @@ export async function bookingDownloadBlob(path: string): Promise<Blob> {
   const res = await fetchBookingRequestsWithAuthRetry(p, { method: 'GET' })
   if (!res.ok) throw new Error(await parseError(res))
   return res.blob()
+}
+
+/** GET payment-status with optional signing token (thank-you page after Stripe). */
+export async function apiGetPaymentStatus<T>(
+  bookingId: string,
+  signToken?: string | null,
+): Promise<T> {
+  const path = `/booking-requests/${encodeURIComponent(bookingId)}/payment-status`
+  const extra: Record<string, string> = {}
+  if (signToken?.trim()) extra['X-Booking-Sign-Token'] = signToken.trim()
+  const res = await fetchBookingRequestsWithAuthRetry(path, {
+    method: 'GET',
+    headers: extra,
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<T>
+}
+
+export function step2SessionKey(bookingId: string): string {
+  return `bfam_step2:${bookingId}`
+}
+
+/** Persist Step 2 token from email link; returns stored value. */
+export function readStep2Token(bookingId: string): string | null {
+  try {
+    return sessionStorage.getItem(step2SessionKey(bookingId))?.trim() || null
+  } catch {
+    return null
+  }
+}
+
+export function writeStep2Token(bookingId: string, token: string): void {
+  try {
+    sessionStorage.setItem(step2SessionKey(bookingId), token.trim())
+  } catch {
+    /* private browsing / quota */
+  }
 }
 
 /** GET without customer/admin auth (e.g. tokenized signing links). */
@@ -332,4 +399,9 @@ export async function adminDelete<T>(path: string): Promise<T> {
   const res = await fetchAdminWithAuthRetry(path, { method: 'DELETE' })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<T>
+}
+
+export async function adminDeleteVoid(path: string): Promise<void> {
+  const res = await fetchAdminWithAuthRetry(path, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await parseError(res))
 }

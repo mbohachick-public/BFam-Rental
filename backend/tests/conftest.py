@@ -308,6 +308,7 @@ def _make_fake_settings():
     s.auth0_admin_roles_claim = ""
     s.auth0_admin_emails = ""
     s.auth0_admin_subs = ""
+    s.environment = "development"
     s.sales_tax_rate_url = ""
     s.sales_tax_fallback_percent = "4.225"
     s.sales_tax_default_postal_code = "64089"
@@ -322,6 +323,9 @@ def _make_fake_settings():
     s.google_maps_http_timeout_sec = 12.0
     s.stripe_publishable_key = ""
     s.damage_waiver_per_day_usd = "15.00"
+    s.rental_terms_url = ""
+    s.step2_token_ttl_days = 14
+    s.is_production = False
     return s
 
 
@@ -361,6 +365,7 @@ def client(fake_client, fake_settings):
     with (
         patch("app.config.get_settings", return_value=fake_settings),
         patch("app.deps.get_settings", return_value=fake_settings),
+        patch("app.services.booking_access.get_settings", return_value=fake_settings),
         patch("app.routers.admin.get_settings", return_value=fake_settings),
         patch("app.routers.booking_requests.get_settings", return_value=fake_settings),
         patch("app.routers.items.get_settings", return_value=fake_settings),

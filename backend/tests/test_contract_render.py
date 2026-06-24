@@ -115,3 +115,18 @@ def test_is_customer_pickup_fulfillment():
     assert is_customer_pickup_fulfillment(_booking()) is True
     assert is_customer_pickup_fulfillment(_booking(delivery_requested=True)) is False
     assert is_customer_pickup_fulfillment(_booking(pickup_from_site_requested=True)) is False
+
+
+def test_rental_agreement_html_escapes_user_supplied_fields():
+    html_out = render_rental_agreement_html(
+        _booking(
+            customer_first_name='<script>alert(1)</script>',
+            customer_last_name='"><img onerror=alert(1) src=x>',
+            customer_email='evil@example.com',
+        ),
+        "Test Trailer",
+    )
+    assert "<script>" not in html_out
+    assert "<img" not in html_out
+    assert "&lt;script&gt;" in html_out
+    assert "&lt;img onerror=alert(1) src=x&gt;" in html_out

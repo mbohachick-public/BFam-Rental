@@ -1241,6 +1241,17 @@ select:focus {
   gap: 0.5rem;
 }
 
+.admin-btn-danger {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 35%, var(--color-border));
+}
+
+.admin-btn-danger:hover:not(:disabled) {
+  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
 .admin-booking-row {
   grid-template-columns: 1fr;
 }

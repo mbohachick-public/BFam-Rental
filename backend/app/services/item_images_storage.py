@@ -10,7 +10,7 @@ from urllib.parse import unquote, urlparse
 from supabase import Client
 
 from app.config import Settings
-from app.services.booking_documents import ext_for_content_type, validate_image_upload
+from app.services.booking_documents import ext_for_content_type, sniff_image_magic, validate_image_upload
 
 ITEM_IMAGES_BUCKET = "item-images"
 MAX_ITEM_IMAGES = 10
@@ -81,7 +81,8 @@ def save_item_image_bytes(
     data: bytes,
     content_type: str,
 ) -> str:
-    ct = validate_image_upload(content_type, len(data), "Image")
+    sniffed = sniff_image_magic(data)
+    ct = validate_image_upload(sniffed or content_type, len(data), "Image")
     ext = ext_for_content_type(ct)
     if ext == ".bin":
         ext = ".jpg"

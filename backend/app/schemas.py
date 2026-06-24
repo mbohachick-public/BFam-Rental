@@ -344,6 +344,8 @@ class BookingPresignResponse(BaseModel):
     license_plate: BookingUploadSlot | None = None
     insurance_card: BookingUploadSlot | None = None
     expires_in: int
+    step2_token: str
+    complete_path: str
 
 
 class BookingCompleteBody(BaseModel):
@@ -505,7 +507,6 @@ class BookingPaymentStatusPublic(BaseModel):
     rental_paid: bool
     rental_payment_status: str | None = None
     item_title: str
-    customer_email: str | None = None
     deposit_secured: bool = False
     requires_deposit: bool = False
 

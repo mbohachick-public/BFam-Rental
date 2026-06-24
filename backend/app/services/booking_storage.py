@@ -8,7 +8,7 @@ from typing import Literal
 
 import httpx
 from fastapi import HTTPException, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, Response
 from storage3.types import CreateSignedUploadUrlOptions
 from supabase import Client
 
@@ -49,9 +49,9 @@ def _supabase_signed_url(client: Client, object_path: str, expires_in: int = 360
 
 
 def create_presigned_booking_upload_slot(client: Client, object_path: str) -> dict[str, str]:
-    """Service-role signed upload URL for one object in booking-documents (upsert)."""
+    """Service-role signed upload URL for one object in booking-documents."""
     bucket = client.storage.from_(BOOKING_DOCUMENTS_BUCKET)
-    opts = CreateSignedUploadUrlOptions(upsert="true")
+    opts = CreateSignedUploadUrlOptions(upsert="false")
     res = bucket.create_signed_upload_url(object_path, opts)
     return {
         "path": str(res["path"]),
@@ -158,22 +158,16 @@ def save_booking_document(
 def admin_document_view_urls(
     settings: Settings, client: Client, row: dict
 ) -> tuple[str | None, str | None, str | None]:
-    """URLs for admin to open documents (browser-friendly)."""
+    """API-proxied document URLs (auth required; no long-lived signed URLs in JSON)."""
     rid = row["id"]
     dl_p = row.get("drivers_license_path")
     lp_p = row.get("license_plate_path")
     ins_p = row.get("insurance_card_path")
     base = settings.api_public_url.rstrip("/")
-    if settings.booking_documents_storage == "local":
-        return (
-            f"{base}/admin/booking-requests/{rid}/files/drivers-license" if dl_p else None,
-            f"{base}/admin/booking-requests/{rid}/files/license-plate" if lp_p else None,
-            f"{base}/admin/booking-requests/{rid}/files/insurance-card" if ins_p else None,
-        )
     return (
-        _supabase_signed_url(client, dl_p) if dl_p else None,
-        _supabase_signed_url(client, lp_p) if lp_p else None,
-        _supabase_signed_url(client, ins_p) if ins_p else None,
+        f"{base}/admin/booking-requests/{rid}/files/drivers-license" if dl_p else None,
+        f"{base}/admin/booking-requests/{rid}/files/license-plate" if lp_p else None,
+        f"{base}/admin/booking-requests/{rid}/files/insurance-card" if ins_p else None,
     )
 
 
@@ -181,25 +175,18 @@ def customer_document_view_urls(
     settings: Settings, client: Client, row: dict
 ) -> tuple[str | None, str | None, str | None]:
     """
-    URLs for the signed-in customer (My rentals).
+    API-relative paths for the signed-in customer (My rentals).
 
-    Supabase: time-limited signed URLs (fine to open in a new tab).
-    Local: API-relative paths — the SPA must fetch with the customer's Bearer token and open a blob URL.
+    The SPA fetches with the customer's Bearer token and opens a blob URL.
     """
     rid = row["id"]
     dl_p = row.get("drivers_license_path")
     lp_p = row.get("license_plate_path")
     ins_p = row.get("insurance_card_path")
-    if settings.booking_documents_storage == "local":
-        return (
-            f"/booking-requests/mine/{rid}/files/drivers-license" if dl_p else None,
-            f"/booking-requests/mine/{rid}/files/license-plate" if lp_p else None,
-            f"/booking-requests/mine/{rid}/files/insurance-card" if ins_p else None,
-        )
     return (
-        _supabase_signed_url(client, dl_p) if dl_p else None,
-        _supabase_signed_url(client, lp_p) if lp_p else None,
-        _supabase_signed_url(client, ins_p) if ins_p else None,
+        f"/booking-requests/mine/{rid}/files/drivers-license" if dl_p else None,
+        f"/booking-requests/mine/{rid}/files/license-plate" if lp_p else None,
+        f"/booking-requests/mine/{rid}/files/insurance-card" if ins_p else None,
     )
 
 
@@ -233,8 +220,8 @@ def _serve_booking_upload_path(
     settings: Settings,
     client: Client,
     rel: str,
-) -> FileResponse | RedirectResponse:
-    """Stream or redirect for one booking-documents object path (license, plate, insurance)."""
+) -> FileResponse | Response:
+    """Stream booking-documents object through the API (no redirect to signed URLs)."""
     if settings.booking_documents_storage == "local":
         fs_path = _safe_local_file(settings, rel)
         if not fs_path.is_file():
@@ -246,20 +233,28 @@ def _serve_booking_upload_path(
             filename=fs_path.name,
         )
 
-    url = _supabase_signed_url(client, rel)
-    if not url:
+    bucket = client.storage.from_(BOOKING_DOCUMENTS_BUCKET)
+    try:
+        data = bucket.download(rel)
+    except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not sign storage URL. Check Supabase Storage bucket configuration.",
-        )
-    return RedirectResponse(url, status_code=307)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found in storage.",
+        ) from exc
+    media = content_type_for_storage_path(rel) or "application/octet-stream"
+    filename = Path(rel).name
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 def admin_booking_file_response(
     client: Client,
     request_id: str,
     file_key: str,
-) -> FileResponse | RedirectResponse:
+) -> FileResponse | Response:
     settings = get_settings()
     if file_key == "drivers-license":
         col = "drivers_license_path"
@@ -293,7 +288,7 @@ def customer_booking_file_response(
     file_key: str,
     *,
     customer_auth0_sub: str,
-) -> FileResponse | RedirectResponse:
+) -> FileResponse | Response:
     """Same as admin file response but only if ``customer_auth0_sub`` matches the booking owner."""
     settings = get_settings()
     if file_key == "drivers-license":

@@ -1,4 +1,4 @@
-import { test, expect, loginAsAdmin, E2E_ADMIN_AUTH_ENABLED } from './fixtures'
+import { test, expect, loginAsAdmin, E2E_ADMIN_AUTH_ENABLED, API_BASE } from './fixtures'
 
 test.describe('Admin items list and CRUD', () => {
   test.beforeAll((_worker, testInfo) => {
@@ -99,5 +99,54 @@ test.describe('Admin items list and CRUD', () => {
     const row = page.locator('.admin-table-row', { hasText: 'Links E2E' })
     await expect(row.getByRole('link', { name: /edit/i })).toBeVisible()
     await expect(row.getByRole('link', { name: /calendar/i })).toBeVisible()
+  })
+
+  test('items list hide control hides item from public catalog', async ({ page, api }) => {
+    const item = await api.createItem({ title: 'List Hide E2E', active: true })
+    await page.goto('/admin/items')
+
+    const row = page.locator('.admin-table-row', { hasText: 'List Hide E2E' })
+    page.once('dialog', (dialog) => dialog.accept())
+    await row.getByRole('button', { name: /^hide$/i }).click()
+    await expect(row).toHaveClass(/admin-table-row-inactive/)
+    await expect(row.locator('.admin-badge-inactive')).toHaveText(/inactive/i)
+
+    await page.goto('/catalog')
+    await expect(page.locator('.catalog-card', { hasText: 'List Hide E2E' })).toHaveCount(0)
+    await page.goto(`/items/${item.id}`)
+    await expect(page.getByText(/not found/i)).toBeVisible()
+  })
+
+  test('items list show control restores item to public catalog', async ({ page, api }) => {
+    const item = await api.createItem({ title: 'List Show E2E', active: false })
+    await page.goto('/admin/items')
+
+    const row = page.locator('.admin-table-row', { hasText: 'List Show E2E' })
+    await expect(row.getByRole('button', { name: /^show$/i })).toBeVisible()
+    page.once('dialog', (dialog) => dialog.accept())
+    await row.getByRole('button', { name: /^show$/i }).click()
+    await expect(row).not.toHaveClass(/admin-table-row-inactive/)
+
+    await page.goto('/catalog')
+    await expect(page.locator('.catalog-card', { hasText: 'List Show E2E' })).toBeVisible()
+    await page.goto(`/items/${item.id}`)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  })
+
+  test('items list delete control removes item permanently', async ({ page, api, request }) => {
+    const item = await api.createItem({ title: 'List Delete E2E' })
+    await page.goto('/admin/items')
+
+    const row = page.locator('.admin-table-row', { hasText: 'List Delete E2E' })
+    page.once('dialog', (dialog) => dialog.accept())
+    await row.getByRole('button', { name: /^delete$/i }).click()
+    await expect(row).toHaveCount(0)
+
+    const token = process.env.E2E_AUTH0_ACCESS_TOKEN?.trim()
+    expect(token).toBeTruthy()
+    const res = await request.get(`${API_BASE}/admin/items/${item.id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    expect(res.status()).toBe(404)
   })
 })

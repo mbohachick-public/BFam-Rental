@@ -90,4 +90,6 @@ Use one **API** identifier for **`AUTH0_AUDIENCE`** (not the Auth0 Management AP
 
 Tokens are validated with RS256 against `https://<AUTH0_DOMAIN>/.well-known/jwks.json` with issuer `https://<AUTH0_DOMAIN>/`.
 
+**Production security (`ENVIRONMENT=production`):** The API refuses to start unless **`AUTH0_DOMAIN`** and **`AUTH0_AUDIENCE`** are set. Set **`AUTH0_ADMIN_SUBS`** or **`AUTH0_ADMIN_EMAILS`** explicitly — do not rely on the generic `admin` role name alone. Run **`Specs/supabase-migration-booking-step2-token.sql`** and **`Specs/supabase-migration-storage-policies.sql`** after the base schema. Step 2 booking routes require the customer’s email completion token (`?t=`) or a signed-in user who owns the booking.
+
 **Production layout (same host vs split API):** see `Specs/Deployment-Environments.md`.

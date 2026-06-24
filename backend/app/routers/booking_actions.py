@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from supabase import Client
 
 from app.branding import LEGAL_BUSINESS_NAME
 from app.config import get_settings
 from app.deps import get_supabase_client
+from app.rate_limit import limiter
 from app.schemas import (
     BookingSignCompleteOut,
     BookingSignPageOut,
@@ -21,6 +24,19 @@ from app.services.contract_signing import (
     resolve_sign_token,
 )
 router = APIRouter(prefix="/booking-actions", tags=["booking-actions"])
+
+
+def _sign_token_expired(tok: dict) -> bool:
+    exp = tok.get("expires_at")
+    if not exp:
+        return False
+    try:
+        exp_dt = datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > exp_dt
+    except Exception:
+        return False
 
 
 def _client_ip(request: Request) -> str | None:
@@ -88,6 +104,7 @@ def get_sign_page(token: str, client: Client = Depends(get_supabase_client)) -> 
 
 
 @router.post("/{token}/sign", response_model=BookingSignResultOut)
+@limiter.limit("20/minute")
 def post_sign_page(
     token: str,
     body: BookingSignSubmit,
@@ -146,6 +163,8 @@ def get_sign_complete(token: str, client: Client = Depends(get_supabase_client))
     tok = load_token_row_by_raw(client, token)
     if not tok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid link.")
+    if _sign_token_expired(tok):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="This link has expired.")
     if not tok.get("used_at"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

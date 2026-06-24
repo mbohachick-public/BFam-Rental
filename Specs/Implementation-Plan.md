@@ -70,7 +70,7 @@ flowchart LR
 **Admin**
 
 - Add rental items and their attributes.
-- Mark items **active** or **inactive**: inactive items are omitted from the public catalog, item detail, and customer quote/booking APIs; admins still see them in the admin item list (visually highlighted) and can load them via `GET /admin/items/{id}` and `GET /admin/items/{id}/availability` for edit and calendar (public `GET /items/...` returns 404 for inactive items).
+- Mark items **active** or **inactive**: inactive items are omitted from the public catalog, item detail, and customer quote/booking APIs; admins still see them in the admin item list (visually highlighted) and can load them via `GET /admin/items/{id}` and `GET /admin/items/{id}/availability` for edit and calendar (public `GET /items/...` returns 404 for inactive items). From the admin items list, **Hide** / **Show** toggles `active` via `PATCH /admin/items/{id}`; **Delete** permanently removes the item via `DELETE /admin/items/{id}` (related bookings, calendar rows, images, and storage files are removed).
 - Accept or **decline** proposed bookings (decline captures a reason, emails the customer with item and dates, sets requested days back to *Open for Booking*).
 - Update each item’s per-date status.
 
@@ -108,7 +108,7 @@ Define concrete routes during implementation; initial shape:
 - `GET /booking-requests/mine` — **Requires** customer Auth0 (Bearer). Returns booking summaries for the JWT `sub` (no document URLs). **501** when Auth0 is not configured on the API.
 - `GET /booking-requests/me/contact` — **Requires** customer Auth0 (Bearer). Returns latest contact fields from the customer’s prior bookings for form prefill, or **404** if none. **501** when Auth0 is not configured.
 - Items include **`towable`** (boolean); admin sets it via item create/update.
-- Admin (stub-guarded): `POST/PATCH /admin/items`, `POST /admin/booking-requests/{id}/approve` (JSON `payment_path`), `POST .../mark-rental-paid`, `POST .../mark-deposit-secured`, `POST .../mark-agreement-signed`, `POST .../confirm`, `POST /admin/booking-requests/{id}/decline` (JSON `reason`), `PUT /admin/items/{id}/availability` (or per-day PATCH).
+- Admin (stub-guarded): `POST/PATCH/DELETE /admin/items`, `POST /admin/booking-requests/{id}/approve` (JSON `payment_path`), `POST .../mark-rental-paid`, `POST .../mark-deposit-secured`, `POST .../mark-agreement-signed`, `POST .../confirm`, `POST /admin/booking-requests/{id}/decline` (JSON `reason`), `PUT /admin/items/{id}/availability` (or per-day PATCH).
 
 ## Data model (high level)
 

@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     damage_waiver_per_day_usd: str = "15.00"
     #: Future toggle: require an insurance card upload before admin approval (not during Step 2 submission).
     requires_insurance_upload: bool = False
+    #: ``development`` or ``production`` — production refuses startup without Auth0 (see ``main`` startup hook).
+    environment: str = "development"
+    #: Days the Step 2 email completion secret remains valid.
+    step2_token_ttl_days: int = 14
 
     @field_validator("supabase_url")
     @classmethod
@@ -226,6 +230,10 @@ class Settings(BaseSettings):
         """Origin for Stripe success/cancel URLs (customer browser)."""
         u = (self.app_base_url or self.frontend_public_url or "").strip().rstrip("/")
         return u
+
+    @property
+    def is_production(self) -> bool:
+        return (self.environment or "").strip().lower() == "production"
 
 
 @lru_cache

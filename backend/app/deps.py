@@ -2,7 +2,7 @@ from collections.abc import Generator
 from typing import Annotated
 
 import jwt as pyjwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from jwt.exceptions import PyJWKClientConnectionError
 from supabase import Client
 
@@ -250,6 +250,24 @@ def optional_customer_jwt_claims(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Auth0 configuration error",
         ) from None
+
+
+def step2_token_optional(
+    t: Annotated[str | None, Query()] = None,
+    x_booking_step_token: Annotated[str | None, Header(alias="X-Booking-Step-Token")] = None,
+) -> str | None:
+    """Step 2 booking secret from email link query ``?t=`` or header."""
+    raw = (t or x_booking_step_token or "").strip()
+    return raw or None
+
+
+def sign_token_optional(
+    sign: Annotated[str | None, Query()] = None,
+    x_booking_sign_token: Annotated[str | None, Header(alias="X-Booking-Sign-Token")] = None,
+) -> str | None:
+    """Signing-flow token for payment-status and related customer pages."""
+    raw = (sign or x_booking_sign_token or "").strip()
+    return raw or None
 
 
 def require_customer_jwt(

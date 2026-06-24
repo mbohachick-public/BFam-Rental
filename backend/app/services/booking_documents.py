@@ -8,6 +8,10 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 ALLOWED_BOOKING_UPLOAD_TYPES = ALLOWED_IMAGE_TYPES | frozenset({"application/pdf"})
 PDF_MAGIC = b"%PDF"
+JPEG_MAGIC = b"\xff\xd8\xff"
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+WEBP_RIFF = b"RIFF"
+WEBP_WEBP = b"WEBP"
 
 
 def _normalize_content_type(raw: str | None) -> str | None:
@@ -78,11 +82,21 @@ def ext_for_content_type(content_type: str) -> str:
     }.get(content_type, ".bin")
 
 
+def sniff_image_magic(data: bytes) -> str | None:
+    if len(data) >= 3 and data[:3] == JPEG_MAGIC[:3]:
+        return "image/jpeg"
+    if len(data) >= 8 and data[:8] == PNG_MAGIC:
+        return "image/png"
+    if len(data) >= 12 and data[:4] == WEBP_RIFF and data[8:12] == WEBP_WEBP:
+        return "image/webp"
+    return None
+
+
 def sniff_booking_document_content_type(path: str, data: bytes) -> str | None:
-    """Infer content type from suffix or minimal PDF sniff for validation."""
-    from_ext = content_type_for_storage_path(path)
-    if from_ext == "application/pdf":
-        return "application/pdf"
+    """Infer content type from magic bytes, then suffix."""
+    magic = sniff_image_magic(data)
+    if magic:
+        return magic
     if len(data) >= len(PDF_MAGIC) and data[: len(PDF_MAGIC)] == PDF_MAGIC:
         return "application/pdf"
-    return from_ext
+    return content_type_for_storage_path(path)

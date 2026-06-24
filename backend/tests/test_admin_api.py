@@ -210,6 +210,75 @@ def test_admin_patch_nonexistent_item(client, admin_headers):
     assert res.status_code == 404
 
 
+def test_admin_delete_item(client, admin_headers, seed_item, db_store):
+    item = seed_item(title="Delete Me")
+    item_id = item["id"]
+    db_store["item_day_status"].append(
+        {"item_id": item_id, "day": "2026-07-01", "status": "open_for_booking"}
+    )
+
+    res = client.delete(f"/admin/items/{item_id}", headers=admin_headers)
+    assert res.status_code == 204
+
+    assert not any(r["id"] == item_id for r in db_store["items"])
+    assert not any(r.get("item_id") == item_id for r in db_store.get("item_images", []))
+    assert not any(r.get("item_id") == item_id for r in db_store.get("item_day_status", []))
+
+
+def test_admin_delete_item_with_booking(client, admin_headers, seed_item, db_store):
+    import uuid as _uuid
+
+    item = seed_item(title="Delete With Booking")
+    item_id = item["id"]
+    bid = str(_uuid.uuid4())
+    db_store["booking_requests"].append(
+        {
+            "id": bid,
+            "item_id": item_id,
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-02",
+            "status": "requested",
+            "customer_email": "delete@test.com",
+            "customer_phone": "5551234567",
+            "discounted_subtotal": 50.0,
+            "deposit_amount": 0.0,
+        }
+    )
+
+    res = client.delete(f"/admin/items/{item_id}", headers=admin_headers)
+    assert res.status_code == 204
+
+    assert not any(r["id"] == item_id for r in db_store["items"])
+    assert not any(r.get("item_id") == item_id for r in db_store["booking_requests"])
+
+
+def test_admin_delete_nonexistent_item(client, admin_headers):
+    res = client.delete(
+        "/admin/items/00000000-0000-0000-0000-000000000000",
+        headers=admin_headers,
+    )
+    assert res.status_code == 404
+
+
+def test_admin_hide_item_excluded_from_public_catalog(client, admin_headers, seed_item):
+    item = seed_item(title="Hide From Catalog", active=True)
+
+    hide = client.patch(
+        f"/admin/items/{item['id']}",
+        json={"active": False},
+        headers=admin_headers,
+    )
+    assert hide.status_code == 200
+    assert hide.json()["active"] is False
+
+    public = client.get("/items")
+    assert public.status_code == 200
+    assert "Hide From Catalog" not in [i["title"] for i in public.json()]
+
+    detail = client.get(f"/items/{item['id']}")
+    assert detail.status_code == 404
+
+
 def test_admin_list_items_includes_inactive(client, admin_headers, seed_item):
     seed_item(title="Active Admin", active=True)
     seed_item(title="Inactive Admin", active=False)

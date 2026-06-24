@@ -650,6 +650,7 @@ def test_presign_and_complete_non_towable(
     assert pre.status_code == 201
     pj = pre.json()
     bid = pj["booking_id"]
+    step2 = pj["step2_token"]
     held = [
         r
         for r in db_store["item_day_status"]
@@ -662,6 +663,7 @@ def test_presign_and_complete_non_towable(
     co = client.post(
         f"/booking-requests/{bid}/complete",
         json={"drivers_license_path": dl_path, "license_plate_path": None},
+        headers={"X-Booking-Step-Token": step2},
     )
     assert co.status_code == 200
     assert co.json()["status"] == "requested"
@@ -690,10 +692,12 @@ def test_complete_fails_without_upload(client, fake_client, fake_settings, seed_
     }
     pre = client.post("/booking-requests/presign", json=body)
     bid = pre.json()["booking_id"]
+    step2 = pre.json()["step2_token"]
     dl_path = pre.json()["drivers_license"]["path"]
     co = client.post(
         f"/booking-requests/{bid}/complete",
         json={"drivers_license_path": dl_path},
+        headers={"X-Booking-Step-Token": step2},
     )
     assert co.status_code == 400
 
@@ -720,7 +724,11 @@ def test_abandon_after_presign(client, fake_settings, db_store, seed_item, seed_
     }
     pre = client.post("/booking-requests/presign", json=body)
     bid = pre.json()["booking_id"]
-    r = client.delete(f"/booking-requests/{bid}/abandon")
+    step2 = pre.json()["step2_token"]
+    r = client.delete(
+        f"/booking-requests/{bid}/abandon",
+        headers={"X-Booking-Step-Token": step2},
+    )
     assert r.status_code == 204
     assert not any(str(rw.get("id")) == bid for rw in db_store.get("booking_requests", []))
     reopened = [

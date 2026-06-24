@@ -12,6 +12,7 @@ from supabase import Client
 
 from app.config import get_settings
 from app.deps import get_supabase_client
+from app.rate_limit import limiter
 from app.services.admin_notify import try_finalize_booking_after_obligations_complete, try_notify_admin_confirm_needed
 from app.services.booking_events import log_booking_event
 from app.services.stripe_checkout import _cents
@@ -166,6 +167,93 @@ def _payment_intent_id(session: dict) -> str | None:
     return None
 
 
+def _session_amount_cents(session: dict) -> int | None:
+    raw = session.get("amount_total")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _checkout_row(client: Client, booking_id: str) -> dict | None:
+    rows = (
+        client.table("booking_requests")
+        .select(
+            "id,stripe_checkout_session_id,stripe_deposit_checkout_session_id,"
+            "rental_total_with_tax,deposit_amount"
+        )
+        .eq("id", booking_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    row = rows[0] if rows else None
+    if not row or not row.get("id"):
+        return None
+    return row
+
+
+def _checkout_session_trusted(
+    client: Client,
+    booking_id: str,
+    session: dict,
+    *,
+    kind: str,
+) -> bool:
+    """
+    After Stripe signature verification, ensure the session id and amount match
+    the latest checkout we issued for this booking (when stored).
+    """
+    row = _checkout_row(client, booking_id)
+    if not row:
+        logger.warning(
+            "stripe_webhook_booking_missing booking_id=%s session_id=%s",
+            booking_id,
+            session.get("id"),
+        )
+        return False
+
+    session_id = str(session.get("id") or "").strip()
+    if kind == "deposit":
+        expected_sid = str(row.get("stripe_deposit_checkout_session_id") or "").strip()
+        amount_field = row.get("deposit_amount")
+    elif kind == "legacy_combo":
+        expected_sid = str(row.get("stripe_checkout_session_id") or "").strip()
+        rental = Decimal(str(row.get("rental_total_with_tax") or "0"))
+        dep = Decimal(str(row.get("deposit_amount") or "0"))
+        amount_field = rental + dep if dep > 0 else rental
+    else:
+        expected_sid = str(row.get("stripe_checkout_session_id") or "").strip()
+        amount_field = row.get("rental_total_with_tax")
+
+    if expected_sid and session_id != expected_sid:
+        logger.warning(
+            "stripe_webhook_session_id_mismatch booking_id=%s kind=%s expected=%s got=%s",
+            booking_id,
+            kind,
+            expected_sid,
+            session_id,
+        )
+        return False
+
+    expected_cents = _cents(Decimal(str(amount_field or "0")))
+    actual_cents = _session_amount_cents(session)
+    if actual_cents is not None and expected_cents > 0 and actual_cents != expected_cents:
+        logger.warning(
+            "stripe_webhook_amount_mismatch booking_id=%s kind=%s expected_cents=%s got=%s",
+            booking_id,
+            kind,
+            expected_cents,
+            actual_cents,
+        )
+        return False
+
+    return True
+
+
 def _handle_rental_checkout_completed(client: Client, session: dict) -> None:
     meta = session.get("metadata") or {}
     booking_id = (meta.get("booking_id") or "").strip()
@@ -178,6 +266,8 @@ def _handle_rental_checkout_completed(client: Client, session: dict) -> None:
             session.get("id"),
             session.get("payment_status"),
         )
+        return
+    if not _checkout_session_trusted(client, booking_id, session, kind="rental"):
         return
 
     now = datetime.now(timezone.utc).isoformat()
@@ -216,6 +306,8 @@ def _handle_deposit_checkout_completed(client: Client, session: dict) -> None:
             session.get("id"),
             session.get("payment_status"),
         )
+        return
+    if not _checkout_session_trusted(client, booking_id, session, kind="deposit"):
         return
     now = datetime.now(timezone.utc).isoformat()
     pi = _payment_intent_id(session)
@@ -281,6 +373,8 @@ def _handle_legacy_combined_checkout_completed(client: Client, session: dict) ->
         logger.error("stripe_webhook_missing_booking_id session_id=%s", session.get("id"))
         return
     if not _checkout_session_paid(session):
+        return
+    if not _checkout_session_trusted(client, booking_id, session, kind="legacy_combo"):
         return
     now = datetime.now(timezone.utc).isoformat()
     pi = _payment_intent_id(session)
@@ -397,6 +491,7 @@ def _handle_checkout_failed(client: Client, session: dict, *, payment_status: st
 
 
 @router.post("/webhook")
+@limiter.limit("300/minute")
 async def stripe_webhook(request: Request, client: Client = Depends(get_supabase_client)):
     settings = get_settings()
     secret = (settings.stripe_webhook_secret or "").strip()

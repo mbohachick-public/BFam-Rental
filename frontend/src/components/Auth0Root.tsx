@@ -1,7 +1,9 @@
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { setCustomerAccessTokenGetter, type CustomerTokenOptions } from '../api/client'
 import { auth0Configured, e2eDevAuth0AccessToken } from '../auth0/config'
+import { safeAppReturnTo } from '../auth0/returnTo'
 import { CustomerSessionProvider, type CustomerSession } from '../context/CustomerSessionContext'
 
 function ClearCustomerTokenGetter() {
@@ -77,13 +79,17 @@ function Auth0SessionShell({ children }: { children: ReactNode }) {
       mode: 'auth0',
       isLoading: auth0.isLoading,
       isAuthenticated: auth0.isAuthenticated,
-      login: () =>
-        auth0.loginWithRedirect({
+      login: (opts) => {
+        const fallback = `${window.location.pathname}${window.location.search}`
+        const returnTo = safeAppReturnTo(opts?.returnTo ?? fallback)
+        void auth0.loginWithRedirect({
+          appState: { returnTo },
           authorizationParams: {
             audience: import.meta.env.VITE_AUTH0_AUDIENCE?.trim() || undefined,
             redirect_uri: window.location.origin,
           },
-        }),
+        })
+      },
       logout: () =>
         auth0.logout({
           logoutParams: { returnTo: window.location.origin },
@@ -115,6 +121,11 @@ export function Auth0Root({ children }: { children: ReactNode }) {
     )
   }
 
+  return <Auth0ProviderWithNavigate>{children}</Auth0ProviderWithNavigate>
+}
+
+function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
+  const navigate = useNavigate()
   const domain = String(import.meta.env.VITE_AUTH0_DOMAIN).trim()
   const clientId = String(import.meta.env.VITE_AUTH0_CLIENT_ID).trim()
   const audience = import.meta.env.VITE_AUTH0_AUDIENCE?.trim()
@@ -130,6 +141,13 @@ export function Auth0Root({ children }: { children: ReactNode }) {
       cacheLocation="localstorage"
       useRefreshTokens
       useRefreshTokensFallback
+      onRedirectCallback={(appState) => {
+        const raw =
+          appState && typeof appState === 'object' && 'returnTo' in appState
+            ? (appState as { returnTo?: unknown }).returnTo
+            : undefined
+        navigate(safeAppReturnTo(typeof raw === 'string' ? raw : undefined), { replace: true })
+      }}
     >
       <Auth0SessionShell>{children}</Auth0SessionShell>
     </Auth0Provider>

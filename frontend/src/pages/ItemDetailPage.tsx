@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
 import { useCustomerSession } from '../context/CustomerSessionContext'
+import { clearRentalDraft, readRentalDraft, writeRentalDraft } from '../lib/rentalDraft'
 import { MonthCalendar } from '../components/MonthCalendar'
 import { StatusLegend } from '../components/StatusLegend'
 import { firstOfMonth, lastOfMonth } from '../lib/calendar'
@@ -121,6 +122,39 @@ export function ItemDetailPage() {
     setLastName('')
     setCustomerAddress('')
     setLogisticsAddressError(null)
+
+    if (!id) return
+    const draft = readRentalDraft()
+    if (!draft) return
+    if (draft.itemId !== id) {
+      clearRentalDraft()
+      return
+    }
+    setStartDate(draft.startDate)
+    setEndDate(draft.endDate)
+    setDeliverToSite(draft.deliverToSite)
+    setPickupFromSite(draft.pickupFromSite)
+    setLogisticsAddress(draft.logisticsAddress)
+    setCustomerAddress(draft.customerAddress)
+    if (draft.email.trim()) setEmail(draft.email)
+    if (draft.phone.trim()) setPhone(draft.phone)
+    if (draft.firstName.trim()) setFirstName(draft.firstName)
+    if (draft.lastName.trim()) setLastName(draft.lastName)
+    if (draft.notes.trim()) setNotes(draft.notes)
+    if (draft.companyName.trim()) setCompanyName(draft.companyName)
+    setQuote(null)
+    const day = draft.startDate.match(/^(\d{4})-(\d{2})-\d{2}$/)
+    if (day) {
+      const y = Number(day[1])
+      const m = Number(day[2])
+      if (y && m >= 1 && m <= 12) {
+        setCalYear(y)
+        setCalMonth(m)
+      }
+    }
+    // Delay removal so React StrictMode's double-invoke still sees the draft.
+    const t = window.setTimeout(() => clearRentalDraft(), 0)
+    return () => window.clearTimeout(t)
   }, [id])
 
   useEffect(() => {
@@ -186,6 +220,12 @@ export function ItemDetailPage() {
   }, [id, customerSignedIn])
 
   useEffect(() => {
+    if (customer.mode !== 'auth0' || !customer.isAuthenticated) return
+    const em = customer.userEmail?.trim()
+    if (em) setEmail((prev) => (prev.trim() ? prev : em))
+  }, [customer])
+
+  useEffect(() => {
     if (item && item.delivery_available === false) {
       setDeliverToSite(false)
       setPickupFromSite(false)
@@ -196,7 +236,7 @@ export function ItemDetailPage() {
   }, [item])
 
   useEffect(() => {
-    if (!id || !item || authBlocksSubmit) return
+    if (!id || !item) return
 
     const handle = window.setTimeout(() => {
       void (async () => {
@@ -265,7 +305,6 @@ export function ItemDetailPage() {
   }, [
     id,
     item,
-    authBlocksSubmit,
     startDate,
     endDate,
     email,
@@ -281,8 +320,34 @@ export function ItemDetailPage() {
     setCalMonth(d.getMonth() + 1)
   }
 
+  function persistRentalDraft() {
+    if (!id) return
+    writeRentalDraft({
+      itemId: id,
+      startDate,
+      endDate,
+      deliverToSite,
+      pickupFromSite,
+      logisticsAddress,
+      customerAddress,
+      email,
+      phone,
+      firstName,
+      lastName,
+      notes,
+      companyName,
+    })
+  }
+
+  function continueToSignIn() {
+    if (customer.mode !== 'auth0' || !id) return
+    persistRentalDraft()
+    customer.login({ returnTo: `/items/${id}` })
+  }
+
   async function submitRequest() {
     if (!id || !startDate || !endDate || !item) return
+    if (authBlocksSubmit) return
     if (!quote) {
       setQuoteError('Please wait for your estimate to finish updating.')
       setLogisticsAddressError(null)
@@ -359,6 +424,7 @@ export function ItemDetailPage() {
       } catch {
         /* ignore */
       }
+      clearRentalDraft()
       window.clearTimeout(phaseTimer)
       setSubmitPhase('redirect')
       navigate(out.complete_path)
@@ -513,14 +579,6 @@ export function ItemDetailPage() {
       <section className="card card-pad section-block booking-block">
         <h2>Step 1 of 2 — Request booking</h2>
         <p className="muted">Reserve your trailer in under 60 seconds. No payment required yet.</p>
-        {customer.mode === 'auth0' && !customer.isLoading && !customer.isAuthenticated && (
-          <p className="booking-auth-hint">
-            <span className="muted">Sign in to see pricing and submit a booking request.</span>{' '}
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => customer.login()}>
-              Sign in
-            </button>
-          </p>
-        )}
         <form
           className="booking-form"
           autoComplete="on"
@@ -798,10 +856,8 @@ export function ItemDetailPage() {
                   Final logistics pricing confirmed after approval.
                 </p>
               </>
-            ) : !quoting && !authBlocksSubmit ? (
+            ) : !quoting ? (
               <p className="muted small">Enter dates and your email to see pricing.</p>
-            ) : !quoting && authBlocksSubmit ? (
-              <p className="muted small">Sign in to see pricing for your dates.</p>
             ) : null}
           </div>
           <p className="muted small field-span booking-step1-cta-hint">
@@ -840,29 +896,45 @@ export function ItemDetailPage() {
               </ul>
             </div>
           ) : null}
-          <div className="booking-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => void submitRequest()}
-              disabled={
-                quoting ||
-                submitting ||
-                authBlocksSubmit ||
-                !quote ||
-                !email.trim() ||
-                phone.trim().length < 7 ||
-                !firstName.trim() ||
-                !lastName.trim() ||
-                !customerAddress.trim() ||
-                (item.delivery_available &&
-                  (deliverToSite || pickupFromSite) &&
-                  !logisticsAddress.trim())
-              }
-            >
-              {submitting ? 'Sending…' : 'Request booking'}
-            </button>
-          </div>
+          {authBlocksSubmit ? (
+            <div className="booking-auth-next card card-pad field-span">
+              <h3>Ready to request this trailer?</h3>
+              <p className="muted">
+                Sign in securely to save your request, receive your estimate, and manage your rental.
+              </p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={continueToSignIn}
+                disabled={quoting || !quote}
+              >
+                Continue to Sign In
+              </button>
+            </div>
+          ) : (
+            <div className="booking-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void submitRequest()}
+                disabled={
+                  quoting ||
+                  submitting ||
+                  !quote ||
+                  !email.trim() ||
+                  phone.trim().length < 7 ||
+                  !firstName.trim() ||
+                  !lastName.trim() ||
+                  !customerAddress.trim() ||
+                  (item.delivery_available &&
+                    (deliverToSite || pickupFromSite) &&
+                    !logisticsAddress.trim())
+                }
+              >
+                {submitting ? 'Sending…' : 'Request booking'}
+              </button>
+            </div>
+          )}
         </form>
       </section>
     </div>

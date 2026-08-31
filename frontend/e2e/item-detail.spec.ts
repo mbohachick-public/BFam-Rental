@@ -70,6 +70,7 @@ test.describe('Item detail page', () => {
     await page.goto(`/items/${itemId}`)
     await expect(page.getByRole('heading', { name: /estimate/i })).toBeVisible()
     await expect(page.getByText(/enter dates and your email to see pricing/i)).toBeVisible()
+    await expect(page.getByText(/sign in to see pricing/i)).toHaveCount(0)
   })
 
   test('booking form: requires driver license to submit', async ({ page }) => {

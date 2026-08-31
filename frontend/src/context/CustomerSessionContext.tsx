@@ -2,13 +2,15 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type ReactNode } from 'react'
 
+export type CustomerLoginOptions = { returnTo?: string }
+
 export type CustomerSession =
   | { mode: 'disabled' }
   | {
       mode: 'auth0'
       isLoading: boolean
       isAuthenticated: boolean
-      login: () => void
+      login: (opts?: CustomerLoginOptions) => void
       logout: () => void
       userEmail: string | undefined
     }

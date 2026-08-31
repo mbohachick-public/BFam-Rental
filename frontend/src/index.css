@@ -1595,6 +1595,19 @@ code {
   margin-top: 1.25rem;
 }
 
+.booking-auth-next {
+  margin-top: 1.25rem;
+}
+
+.booking-auth-next h3 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.booking-auth-next .btn {
+  margin-top: 0.5rem;
+}
+
 .booking-success-block {
   margin-top: 0.75rem;
 }

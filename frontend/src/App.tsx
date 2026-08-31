@@ -23,9 +23,9 @@ import { TrailerMatchAssistantPage } from './pages/TrailerMatchAssistantPage'
 
 export default function App() {
   return (
-    <Auth0Root>
-      <AdminSessionProvider>
-        <BrowserRouter>
+    <BrowserRouter>
+      <Auth0Root>
+        <AdminSessionProvider>
           <Routes>
             <Route path="/" element={<Layout />}>
               <Route index element={<HomePage />} />
@@ -53,8 +53,8 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </BrowserRouter>
-      </AdminSessionProvider>
-    </Auth0Root>
+        </AdminSessionProvider>
+      </Auth0Root>
+    </BrowserRouter>
   )
 }

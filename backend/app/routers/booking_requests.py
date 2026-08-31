@@ -1812,12 +1812,18 @@ def create_booking_request(
 
 
 @router.post("/quote", response_model=BookingQuote)
+@limiter.limit("60/minute")
 def quote_booking(
+    request: Request,
     body: BookingQuoteRequest,
-    _customer: dict | None = Depends(customer_jwt_claims),
+    _customer: dict | None = Depends(optional_customer_jwt_claims),
     client: Client = Depends(get_supabase_client),
 ) -> BookingQuote:
-    """Preview pricing for the UI; the quote email is sent when the customer submits intake."""
+    """Ephemeral pricing preview. Auth0 identity is optional; nothing is persisted or emailed.
+
+    Rate limit: 60 requests/minute per client IP (SlowAPI). Interactive date/transport
+    tweaks stay under this; it bounds anonymous Distance Matrix / tax lookups.
+    """
     settings = get_settings()
     item_res = (
         client.table("items")

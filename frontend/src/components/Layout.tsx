@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { LEGAL_BUSINESS_NAME, OFFER_TAGLINE, SERVICE_AREA_TAGLINE } from '../branding'
 import { useCustomerSession } from '../context/CustomerSessionContext'
@@ -6,32 +7,58 @@ import { useAdminApiReady } from '../hooks/useAdminApiReady'
 export function Layout() {
   const customer = useCustomerSession()
   const adminApiReady = useAdminApiReady()
+  const [navOpen, setNavOpen] = useState(false)
+
+  useEffect(() => {
+    if (!navOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [navOpen])
+
+  const closeNav = () => setNavOpen(false)
 
   return (
     <div className="layout">
       <header className="site-header">
         <div className="container header-inner">
-          <Link to="/" className="brand">
+          <Link to="/" className="brand" onClick={closeNav}>
             <img src="/favicon_v2.png" alt="" width={48} height={48} className="brand-logo" />
             <span className="brand-text">
               <span className="brand-name brand-name-legal">{LEGAL_BUSINESS_NAME}</span>
             </span>
           </Link>
-          <nav className="nav-main" aria-label="Main">
-            <NavLink to="/" end className="nav-link">
+          <button
+            type="button"
+            className="nav-toggle"
+            aria-expanded={navOpen}
+            aria-controls="site-nav-main"
+            onClick={() => setNavOpen((open) => !open)}
+          >
+            <span className="nav-toggle-icon" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            {navOpen ? 'Close' : 'Menu'}
+          </button>
+          <nav id="site-nav-main" className={navOpen ? 'nav-main is-open' : 'nav-main'} aria-label="Main">
+            <NavLink to="/" end className="nav-link" onClick={closeNav}>
               Home
             </NavLink>
-            <NavLink to="/catalog" className="nav-link">
+            <NavLink to="/catalog" className="nav-link" onClick={closeNav}>
               Catalog
             </NavLink>
-            <NavLink to="/trailer-match" className="nav-link">
+            <NavLink to="/trailer-match" className="nav-link" onClick={closeNav}>
               Trailer match
             </NavLink>
             {customer.mode === 'auth0' && !customer.isLoading && (
               <>
                 {customer.isAuthenticated ? (
                   <>
-                    <NavLink to="/my-rentals" className="nav-link">
+                    <NavLink to="/my-rentals" className="nav-link" onClick={closeNav}>
                       My rentals
                     </NavLink>
                     <span className="nav-customer-email" title={customer.userEmail}>
@@ -40,7 +67,10 @@ export function Layout() {
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      onClick={() => customer.logout()}
+                      onClick={() => {
+                        closeNav()
+                        customer.logout()
+                      }}
                     >
                       Sign out
                     </button>
@@ -49,7 +79,10 @@ export function Layout() {
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    onClick={() => customer.login()}
+                    onClick={() => {
+                      closeNav()
+                      customer.login()
+                    }}
                   >
                     Sign in
                   </button>
@@ -57,7 +90,7 @@ export function Layout() {
               </>
             )}
             {adminApiReady ? (
-              <NavLink to="/admin/items" className="nav-link">
+              <NavLink to="/admin/items" className="nav-link" onClick={closeNav}>
                 Admin
               </NavLink>
             ) : null}

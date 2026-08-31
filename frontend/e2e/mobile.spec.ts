@@ -52,16 +52,28 @@ test.describe('Mobile viewports', () => {
         page.getByRole('heading', { name: 'Dump Trailer Rentals – Liberty & KC Northland' }),
       ).toBeVisible()
 
-      // Filters should be visible
+      await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Home', exact: true })).toBeHidden()
+
+      const filtersToggle = page.getByText('Filters', { exact: true })
+      await expect(filtersToggle).toBeVisible()
+      await filtersToggle.click()
       await expect(page.getByLabel('Category')).toBeVisible()
 
-      // Cards grid: verify cards exist
       const grid = page.locator('.catalog-grid')
-      await expect(grid).toBeVisible({ timeout: 10_000 })
+      await expect(grid).toBeAttached({ timeout: 10_000 })
+      const cards = page.locator('.catalog-card')
+      const count = await cards.count()
+      if (count >= 2) {
+        const first = await cards.nth(0).boundingBox()
+        const second = await cards.nth(1).boundingBox()
+        expect(second!.y).toBeGreaterThan(first!.y + (first!.height / 2))
+      }
     })
 
     test('price sliders are usable on mobile', async ({ page }) => {
       await page.goto('/catalog')
+      await page.getByText('Filters', { exact: true }).click()
       const minSlider = page.getByLabel(/minimum dollars/i)
       await expect(minSlider).toBeVisible()
       const box = await minSlider.boundingBox()

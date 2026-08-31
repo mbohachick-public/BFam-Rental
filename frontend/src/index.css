@@ -169,6 +169,47 @@ a:hover {
   gap: 0.35rem 1rem;
 }
 
+.nav-toggle {
+  display: none;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.45rem 0.7rem;
+  min-height: 44px;
+  border: 1px solid rgb(28 25 23 / 22%);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-chrome-text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.nav-toggle:hover {
+  background: var(--color-brand-tint-6);
+}
+
+.nav-toggle:focus-visible {
+  outline: 2px solid var(--color-accent-orange);
+  outline-offset: 2px;
+}
+
+.nav-toggle-icon {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 1rem;
+  height: 0.75rem;
+}
+
+.nav-toggle-icon span {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
 .nav-link {
   color: var(--color-chrome-text);
   text-decoration: none;
@@ -196,6 +237,49 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .header-inner {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .brand-name-legal {
+    max-width: min(14rem, calc(100vw - 9.5rem));
+  }
+
+  .nav-toggle {
+    display: inline-flex;
+    margin-left: auto;
+  }
+
+  .nav-main {
+    display: none;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    margin-top: 0.65rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .nav-main.is-open {
+    display: flex;
+  }
+
+  .nav-main .nav-link,
+  .nav-main .btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .nav-main .btn {
+    align-self: flex-start;
+    margin-top: 0.35rem;
+  }
 }
 
 .booking-auth-hint {
@@ -465,6 +549,12 @@ a.btn.btn-primary:hover:not(:disabled) {
   border-top: 1px solid var(--color-border);
 }
 
+.filters-body input,
+.filters-body select {
+  width: 100%;
+  max-width: 100%;
+}
+
 .filters-actions {
   display: flex;
   flex-wrap: wrap;
@@ -721,7 +811,7 @@ select:focus {
   grid-template-columns: 1fr;
 }
 
-@media (min-width: 640px) {
+@media (min-width: 768px) {
   .catalog-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -740,6 +830,7 @@ select:focus {
   text-decoration: none;
   color: inherit;
   overflow: hidden;
+  min-width: 0;
 }
 
 .catalog-card:hover {
@@ -821,6 +912,25 @@ select:focus {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--color-accent-orange);
+}
+
+@media (max-width: 767px) {
+  .catalog-cta {
+    font-size: 1rem;
+    padding: 0.35rem 0 0.1rem;
+  }
+
+  .catalog-trailer-match-banner {
+    align-items: flex-start;
+  }
+
+  .catalog-trailer-match-banner .btn {
+    min-height: 44px;
+  }
+
+  .filters-summary {
+    min-height: 44px;
+  }
 }
 
 .catalog-price {

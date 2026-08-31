@@ -6,7 +6,12 @@ test.describe('Catalog page', () => {
   })
 
   test('displays heading and filter form', async ({ page }) => {
-    await expect(page.getByRole('heading', { level: 1, name: 'Catalog' })).toBeVisible()
+    await expect(
+      page.getByRole('heading', {
+        level: 1,
+        name: 'Dump Trailer Rentals – Liberty & KC Northland',
+      }),
+    ).toBeVisible()
     await expect(page.getByLabel('Category')).toBeVisible()
     await expect(page.getByLabel(/minimum dollars/i)).toBeVisible()
     await expect(page.getByLabel(/maximum dollars/i)).toBeVisible()

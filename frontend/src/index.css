@@ -708,6 +708,10 @@ select:focus {
   outline-offset: 1px;
 }
 
+.page-catalog > h1 {
+  overflow-wrap: break-word;
+}
+
 .catalog-grid {
   list-style: none;
   padding: 0;

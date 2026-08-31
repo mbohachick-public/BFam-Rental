@@ -48,7 +48,9 @@ test.describe('Mobile viewports', () => {
   test.describe('Mobile: Catalog', () => {
     test('filters and cards render in single-column', async ({ page }) => {
       await page.goto('/catalog')
-      await expect(page.getByRole('heading', { name: 'Catalog' })).toBeVisible()
+      await expect(
+        page.getByRole('heading', { name: 'Dump Trailer Rentals – Liberty & KC Northland' }),
+      ).toBeVisible()
 
       // Filters should be visible
       await expect(page.getByLabel('Category')).toBeVisible()

@@ -97,10 +97,10 @@ export function CatalogPage() {
 
   return (
     <div className="container page-catalog">
-      <h1>Catalog</h1>
+      <h1>Dump Trailer Rentals – Liberty & KC Northland</h1>
       <p className="muted">
-        Filter by category, daily rate range (drag both handles), and optional date range (every day
-        in the range must be open for booking).
+        Choose a trailer below to check availability and request your rental. Customer pickup or
+        delivery available.
       </p>
 
       <div className="card card-pad catalog-trailer-match-banner">
@@ -135,6 +135,10 @@ export function CatalogPage() {
             setFiltersOpen(false)
           }}
         >
+          <p className="muted small">
+            Filter by category, daily rate range (drag both handles), and optional date range (every
+            day in the range must be open for booking).
+          </p>
           <div className="filters-grid filters-grid-wide">
             <label className="field">
               <span className="field-label">Category</span>
@@ -287,7 +291,7 @@ export function CatalogPage() {
                 <p className="catalog-price">{money(item.cost_per_day)} / day</p>
                 <p className="catalog-deposit muted small">Deposit {money(item.deposit_amount)}</p>
                 <p className="catalog-cta" aria-hidden>
-                  Request booking →
+                  Check Availability →
                 </p>
               </div>
             </Link>
